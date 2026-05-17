@@ -14,6 +14,8 @@ class Settings(BaseSettings):
     otp_provider: str = "2factor"
     twofactor_api_key: str | None = None
     twofactor_template_name: str | None = None
+    msg91_authkey: str | None = None
+    msg91_template_id: str | None = None
     otp_expire_minutes: int = 5
     otp_resend_after_seconds: int = 45
 

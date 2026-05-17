@@ -44,6 +44,46 @@ def test_twofactor_provider_treats_otp_mismatch_as_failed_verification(monkeypat
     assert provider.verify_otp("session-id", "000000") is False
 
 
+def test_msg91_provider_sends_otp_with_template_and_mobile(monkeypatch):
+    from app.sms import Msg91OtpProvider
+
+    captured = {}
+
+    def fake_request_json(self, url, *, method="GET", body=None, headers=None):
+        captured["url"] = url
+        captured["method"] = method
+        captured["body"] = body
+        captured["headers"] = headers
+        return {"type": "success", "message": "OTP sent successfully"}
+
+    monkeypatch.setattr(Msg91OtpProvider, "_request_json", fake_request_json)
+    provider = Msg91OtpProvider(authkey="test-auth", template_id="template-123")
+
+    assert provider.request_otp("+91 98765 43210") == "919876543210"
+    assert "template_id=template-123" in captured["url"]
+    assert "mobile=919876543210" in captured["url"]
+    assert captured["headers"] == {"authkey": "test-auth"}
+
+
+def test_msg91_provider_verifies_otp_with_authkey_header(monkeypatch):
+    from app.sms import Msg91OtpProvider
+
+    captured = {}
+
+    def fake_request_json(self, url, *, method="GET", body=None, headers=None):
+        captured["url"] = url
+        captured["headers"] = headers
+        return {"type": "success", "message": "OTP verified success"}
+
+    monkeypatch.setattr(Msg91OtpProvider, "_request_json", fake_request_json)
+    provider = Msg91OtpProvider(authkey="test-auth", template_id="template-123")
+
+    assert provider.verify_otp("919876543210", "123456") is True
+    assert "otp=123456" in captured["url"]
+    assert "mobile=919876543210" in captured["url"]
+    assert captured["headers"] == {"authkey": "test-auth"}
+
+
 def test_phone_otp_verify_creates_member_session_and_authenticates_me(client, otp_provider):
     request_response = client.post("/api/v1/auth/otp/request", json={"phone": "+91 98765 43210"})
     challenge_id = request_response.json()["challenge_id"]
