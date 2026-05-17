@@ -1,8 +1,13 @@
+def _phone_for_email(email: str) -> str:
+    digits = ''.join(str(ord(char) % 10) for char in email)
+    return f"91{digits[:10].ljust(10, '0')}"
+
+
 def register(client, name, email, role="member"):
     payload = {
         "name": name,
         "email": email,
-        "phone": "9999999999",
+        "phone": _phone_for_email(email),
         "password": "StrongPass123",
     }
     if role is not None:
@@ -339,6 +344,15 @@ def test_vendor_enquiry_and_booking_approval_flow(client):
     booking_id = booking.json()["id"]
     assert booking.json()["status"] == "pending"
     assert booking.json()["total_amount"] == 25000
+    assert booking.json()["organizer_contact_name"] == "Organizer One"
+    assert booking.json()["organizer_contact_phone"] == _phone_for_email("org@example.com")
+
+    organizer_bookings = client.get("/api/v1/bookings", headers=org_headers)
+    assert organizer_bookings.status_code == 200
+    organizer_booking = next(item for item in organizer_bookings.json() if item["id"] == booking_id)
+    assert organizer_booking["vendor_contact_name"] == "Balaji"
+    assert organizer_booking["vendor_contact_phone"] == "9999999999"
+    assert organizer_booking["business_name"] == "Yuneekway"
 
     duplicate = client.post(
         "/api/v1/bookings",

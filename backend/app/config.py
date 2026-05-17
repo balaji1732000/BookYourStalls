@@ -11,6 +11,11 @@ class Settings(BaseSettings):
     seed_super_admin_email: str | None = None
     seed_super_admin_password: str | None = None
     seed_super_admin_name: str = "Super Admin"
+    otp_provider: str = "2factor"
+    twofactor_api_key: str | None = None
+    twofactor_template_name: str | None = None
+    otp_expire_minutes: int = 5
+    otp_resend_after_seconds: int = 45
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 

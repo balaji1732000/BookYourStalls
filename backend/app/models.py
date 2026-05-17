@@ -52,9 +52,10 @@ class User(Base, TimestampMixin):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     name: Mapped[str] = mapped_column(String(120))
-    email: Mapped[str] = mapped_column(String(255), unique=True, index=True)
-    phone: Mapped[str | None] = mapped_column(String(30), nullable=True)
-    password_hash: Mapped[str] = mapped_column(String(255))
+    email: Mapped[str | None] = mapped_column(String(255), unique=True, index=True, nullable=True)
+    phone: Mapped[str | None] = mapped_column(String(30), nullable=True, unique=True, index=True)
+    phone_verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    password_hash: Mapped[str | None] = mapped_column(String(255), nullable=True)
     role: Mapped[str] = mapped_column(String(30), index=True)
     is_active: Mapped[bool] = mapped_column(default=True)
 
@@ -63,6 +64,18 @@ class User(Base, TimestampMixin):
     bookings: Mapped[list["Booking"]] = relationship(back_populates="vendor")
     organizer_profile: Mapped["OrganizerProfile | None"] = relationship(back_populates="user", uselist=False)
     vendor_profile: Mapped["VendorProfile | None"] = relationship(back_populates="user", uselist=False)
+
+
+class OtpChallenge(Base, TimestampMixin):
+    __tablename__ = "otp_challenges"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    phone: Mapped[str] = mapped_column(String(30), index=True)
+    provider_session_id: Mapped[str] = mapped_column(String(255), index=True)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    consumed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    attempt_count: Mapped[int] = mapped_column(Integer, default=0)
+    max_attempts: Mapped[int] = mapped_column(Integer, default=5)
 
 
 class OrganizerProfile(Base, TimestampMixin):
@@ -173,3 +186,19 @@ class Booking(Base, TimestampMixin):
     event: Mapped[Event] = relationship(back_populates="bookings")
     stall: Mapped[Stall] = relationship(back_populates="bookings")
     vendor: Mapped[User] = relationship(back_populates="bookings")
+
+    @property
+    def organizer_contact_name(self) -> str | None:
+        return self.event.organizer.name if self.event and self.event.organizer else None
+
+    @property
+    def organizer_contact_phone(self) -> str | None:
+        return self.event.organizer.phone if self.event and self.event.organizer else None
+
+    @property
+    def vendor_contact_name(self) -> str:
+        return self.contact_name
+
+    @property
+    def vendor_contact_phone(self) -> str:
+        return self.contact_phone

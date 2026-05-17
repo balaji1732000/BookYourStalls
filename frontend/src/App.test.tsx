@@ -69,6 +69,37 @@ describe('Book Your Stall frontend', () => {
     window.history.pushState({}, '', '/')
   })
 
+  it('logs in with real SMS OTP flow and stores the returned session', async () => {
+    window.history.pushState({}, '', '/login')
+    const fetchMock = vi.fn((url: string, options?: RequestInit) => {
+      if (url.includes('/auth/otp/request') && options?.method === 'POST') {
+        return Promise.resolve(new Response(JSON.stringify({ challenge_id: 'challenge-1', expires_in_seconds: 300, resend_after_seconds: 45 }), { status: 200 }))
+      }
+      if (url.includes('/auth/otp/verify') && options?.method === 'POST') {
+        return Promise.resolve(new Response(JSON.stringify({
+          access_token: 'otp-token',
+          token_type: 'bearer',
+          is_new_user: true,
+          user: { id: 9, name: 'User 3210', email: null, phone: '919876543210', phone_verified_at: '2026-05-10T00:00:00', role: 'member', is_active: true, created_at: '2026-05-10T00:00:00' },
+        }), { status: 200 }))
+      }
+      return Promise.resolve(new Response(JSON.stringify(eventsPayload), { status: 200 }))
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(<App />)
+    await userEvent.type(screen.getByLabelText(/mobile number/i), '9876543210')
+    await userEvent.click(screen.getByRole('button', { name: /send otp/i }))
+
+    expect(await screen.findByText(/otp sent/i)).toBeInTheDocument()
+    await userEvent.type(screen.getByLabelText(/enter otp/i), '123456')
+    await userEvent.click(screen.getByRole('button', { name: /verify.*continue/i }))
+
+    await waitFor(() => expect(localStorage.getItem('bys_token')).toBe('otp-token'))
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes('/auth/otp/request'))).toBe(true)
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes('/auth/otp/verify'))).toBe(true)
+  })
+
   it('shows event listing with filters and event cards', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify(eventsPayload), { status: 200 })))
 
@@ -125,22 +156,25 @@ describe('Book Your Stall frontend', () => {
     expect(screen.queryByText('Chennai Summer Expo')).not.toBeInTheDocument()
   })
 
-  it('keeps city search input in sync with city chips and trims typed city filters', async () => {
+  it('uses search-first discovery with quick chips, selected filters, and city carousel', async () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify(eventsPayload), { status: 200 }))
     vi.stubGlobal('fetch', fetchMock)
 
     render(<App />)
-    const cityInput = screen.getByLabelText(/find events by city/i)
+    const searchInput = screen.getByLabelText(/search events, city, category or vendor type/i)
     await screen.findByText('Chennai Summer Expo')
 
-    await userEvent.click(screen.getByRole('button', { name: /bbangalore/i }))
-    expect(cityInput).toHaveValue('Bangalore')
-    await waitFor(() => expect(fetchMock.mock.calls.some(([url]) => String(url).includes('city=Bangalore'))).toBe(true))
+    await userEvent.type(searchInput, '  thrift chennai  ')
+    await waitFor(() => expect(fetchMock.mock.calls.some(([url]) => String(url).includes('q=thrift+chennai'))).toBe(true))
+    expect(fetchMock.mock.calls.every(([url]) => !String(url).includes('%20%20thrift'))).toBe(true)
 
-    await userEvent.clear(cityInput)
-    await userEvent.type(cityInput, '  Mumbai  ')
-    await waitFor(() => expect(fetchMock.mock.calls.some(([url]) => String(url).includes('city=Mumbai'))).toBe(true))
-    expect(fetchMock.mock.calls.every(([url]) => !String(url).includes('%20%20Mumbai'))).toBe(true)
+    await userEvent.click(screen.getByRole('button', { name: /bbangalore/i }))
+    await waitFor(() => expect(fetchMock.mock.calls.some(([url]) => String(url).includes('city=Bangalore'))).toBe(true))
+    expect(screen.getByRole('button', { name: /remove bangalore filter/i })).toBeInTheDocument()
+
+    await userEvent.click(within(screen.getByLabelText(/popular searches/i)).getByRole('button', { name: /thrift/i }))
+    await waitFor(() => expect(fetchMock.mock.calls.some(([url]) => String(url).includes('category=Thrift%2Fvintage+market'))).toBe(true))
+    expect(screen.getByRole('button', { name: /remove thrift\/vintage market filter/i })).toBeInTheDocument()
   })
 
   it('does not render duplicated footfall fallback text when expected footfall is missing', async () => {
@@ -209,8 +243,8 @@ describe('Book Your Stall frontend', () => {
     render(<App />)
     await userEvent.click(screen.getByRole('link', { name: /notifications/i }))
 
-    expect(screen.getByRole('heading', { name: /notifications/i })).toBeInTheDocument()
-    expect(screen.getByText(/no new notifications/i)).toBeInTheDocument()
+    expect(screen.getByRole('heading', { level: 1, name: /notifications/i })).toBeInTheDocument()
+    expect(screen.getByText(/please login to view notifications/i)).toBeInTheDocument()
   })
 
   it('opens create event from the plus button, publishes it, and shows it on home', async () => {
@@ -237,7 +271,6 @@ describe('Book Your Stall frontend', () => {
     await userEvent.type(screen.getByLabelText(/end date/i), '2026-12-02')
     await userEvent.selectOptions(screen.getByLabelText(/crowd type/i), 'Families')
     await userEvent.click(screen.getByRole('checkbox', { name: /shopping expo/i }))
-    await userEvent.click(screen.getByRole('checkbox', { name: /^clothing$/i }))
     await userEvent.click(screen.getByRole('button', { name: /create event/i }))
 
     expect(await screen.findByRole('heading', { name: /book your perfect stall/i })).toBeInTheDocument()
@@ -435,9 +468,9 @@ describe('Book Your Stall frontend', () => {
     expect(JSON.parse(String(registerCall?.[1]?.body))).not.toHaveProperty('role')
   })
 
-  it('lets a member create a production event with multiple event and vendor categories', async () => {
+  it('lets a member create an event with suggested and custom event categories only', async () => {
     localStorage.setItem('bys_token', 'member-token')
-    const createdEvent = { ...eventsPayload.items[0], id: 44, title: 'Creator Expo', venue_name: 'Creator Hall', start_date: '2026-12-01', end_date: '2026-12-02', status: 'draft', categories: ['Shopping expo', 'Thrift/vintage market'], allowed_vendor_categories: ['Clothing', 'Accessories'] }
+    const createdEvent = { ...eventsPayload.items[0], id: 44, title: 'Creator Expo', venue_name: 'Creator Hall', start_date: '2026-12-01', end_date: '2026-12-02', status: 'draft', categories: ['Shopping expo', 'Vintage sneaker meetup'], allowed_vendor_categories: [] }
     const publishedEvent = { ...createdEvent, status: 'published' }
     const fetchMock = vi.fn((url: string, options?: RequestInit) => {
       if (url.includes('/auth/me')) return Promise.resolve(new Response(JSON.stringify({ id: 3, name: 'Balaji', email: 'balaji@example.com', phone: '9000001002', role: 'member', is_active: true, created_at: '2026-05-10T00:00:00' }), { status: 200 }))
@@ -451,7 +484,7 @@ describe('Book Your Stall frontend', () => {
     render(<App />)
     await userEvent.click(screen.getByRole('link', { name: /create event/i }))
     expect(await screen.findByRole('heading', { name: /create event/i })).toBeInTheDocument()
-    expect(screen.queryByText(/login as organizer/i)).not.toBeInTheDocument()
+    expect(screen.queryByText(/allowed vendor categories/i)).not.toBeInTheDocument()
 
     await userEvent.type(screen.getByLabelText(/^title/i), 'Creator Expo')
     await userEvent.selectOptions(screen.getByLabelText(/^city/i), 'Chennai')
@@ -461,18 +494,53 @@ describe('Book Your Stall frontend', () => {
     await userEvent.selectOptions(screen.getByLabelText(/crowd type/i), 'Families')
     await userEvent.type(screen.getByLabelText(/expected footfall/i), '10000')
     await userEvent.click(screen.getByRole('checkbox', { name: /shopping expo/i }))
-    await userEvent.click(screen.getByRole('checkbox', { name: /thrift\/vintage market/i }))
-    await userEvent.click(screen.getByRole('checkbox', { name: /^clothing$/i }))
-    await userEvent.click(screen.getByRole('checkbox', { name: /accessories/i }))
+    await userEvent.type(screen.getByLabelText(/add custom event category/i), 'Vintage sneaker meetup')
+    await userEvent.click(screen.getByRole('button', { name: /add category/i }))
+    expect(screen.getByRole('checkbox', { name: /vintage sneaker meetup/i })).toBeChecked()
     await userEvent.click(screen.getByRole('button', { name: /create event/i }))
 
     await screen.findByRole('heading', { name: /book your perfect stall/i })
     const createCall = fetchMock.mock.calls.find(([url, options]) => String(url).endsWith('/events') && options?.method === 'POST')
     expect(JSON.parse(String(createCall?.[1]?.body))).toMatchObject({
-      categories: ['Shopping expo', 'Thrift/vintage market'],
-      allowed_vendor_categories: ['Clothing', 'Accessories'],
+      categories: ['Shopping expo', 'Vintage sneaker meetup'],
       crowd_type: 'Families',
     })
+    expect(JSON.parse(String(createCall?.[1]?.body))).not.toHaveProperty('allowed_vendor_categories')
+  })
+
+  it('presents create event as mobile-friendly sections with category chips', async () => {
+    localStorage.setItem('bys_token', 'member-token')
+    vi.stubGlobal('fetch', vi.fn((url: string) => {
+      if (url.includes('/auth/me')) return Promise.resolve(new Response(JSON.stringify({ id: 3, name: 'Balaji', email: 'balaji@example.com', phone: '9000001002', role: 'member', is_active: true, created_at: '2026-05-10T00:00:00' }), { status: 200 }))
+      return Promise.resolve(new Response(JSON.stringify(eventsPayload), { status: 200 }))
+    }))
+
+    render(<App />)
+    await userEvent.click(screen.getByRole('link', { name: /create event/i }))
+
+    const eventForm = await screen.findByRole('form', { name: /create event/i })
+    expect(eventForm).toHaveClass('event-builder')
+    expect(screen.getByText(/1/i).closest('.form-step-card')).toHaveTextContent(/event basics/i)
+    expect(screen.getByText(/2/i).closest('.form-step-card')).toHaveTextContent(/event type/i)
+    expect(screen.getByRole('checkbox', { name: /shopping expo/i }).closest('.category-chip')).toBeInTheDocument()
+  })
+
+  it('shows a vendor-friendly booking panel with package summary before request fields', async () => {
+    localStorage.setItem('bys_token', 'member-token')
+    vi.stubGlobal('fetch', vi.fn((url: string) => {
+      if (url.includes('/auth/me')) return Promise.resolve(new Response(JSON.stringify({ id: 2, name: 'Balaji', email: 'b@example.com', phone: '9999999999', role: 'member', is_active: true, created_at: '2026-05-10T00:00:00' }), { status: 200 }))
+      if (url.includes('/events/10/detail')) return Promise.resolve(new Response(JSON.stringify(detailPayload), { status: 200 }))
+      return Promise.resolve(new Response(JSON.stringify(eventsPayload), { status: 200 }))
+    }))
+
+    render(<App />)
+    await userEvent.click(await screen.findByRole('link', { name: /view details chennai summer expo/i }))
+    await userEvent.click(await screen.findByRole('button', { name: /request booking/i }))
+
+    const bookingPanel = await screen.findByRole('form', { name: /request stall booking/i })
+    expect(bookingPanel).toHaveClass('booking-panel')
+    expect(screen.getByText(/selected package/i).closest('.booking-summary-card')).toHaveTextContent(/pending organizer approval/i)
+    expect(screen.getByText(/your business details/i)).toBeInTheDocument()
   })
 
   it('shows booking submitted tick screen and redirects to conducted events', async () => {
@@ -501,5 +569,59 @@ describe('Book Your Stall frontend', () => {
     expect(screen.getByText(/BYS-TICK/i)).toBeInTheDocument()
     expect(await screen.findByRole('heading', { name: /my conducted events/i })).toBeInTheDocument()
     expect(await screen.findByText('My Conducted Expo')).toBeInTheDocument()
+  })
+
+  it('reveals organiser phone to vendor after booking request is submitted', async () => {
+    localStorage.setItem('bys_token', 'member-token')
+    const myEventsPayload = { total: 0, items: [] }
+    const fetchMock = vi.fn((url: string, options?: RequestInit) => {
+      if (url.includes('/auth/me')) return Promise.resolve(new Response(JSON.stringify({ id: 2, name: 'Balaji', email: 'b@example.com', phone: '9999999999', role: 'member', is_active: true, created_at: '2026-05-10T00:00:00' }), { status: 200 }))
+      if (url.includes('/events/10/detail')) return Promise.resolve(new Response(JSON.stringify(detailPayload), { status: 200 }))
+      if (url.includes('/events/mine')) return Promise.resolve(new Response(JSON.stringify(myEventsPayload), { status: 200 }))
+      if (url.includes('/bookings') && options?.method === 'POST') return Promise.resolve(new Response(JSON.stringify({ id: 99, event_id: 10, stall_id: 7, vendor_id: 2, booking_reference: 'BYS-CONNECT', status: 'pending', business_name: 'Yuneekway', contact_name: 'Balaji', contact_phone: '9999999999', organizer_contact_name: 'Organizer One', organizer_contact_phone: '9000001001', vendor_contact_name: 'Balaji', vendor_contact_phone: '9999999999', notes: 'Vintage clothing stall', total_amount: 25000, created_at: '2026-05-10T00:00:00', updated_at: '2026-05-10T00:00:00' }), { status: 201 }))
+      if (url.includes('/events')) return Promise.resolve(new Response(JSON.stringify(eventsPayload), { status: 200 }))
+      return Promise.resolve(new Response('{}', { status: 404 }))
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(<App />)
+    await userEvent.click(await screen.findByRole('link', { name: /view details chennai summer expo/i }))
+    await userEvent.click(await screen.findByRole('button', { name: /request booking/i }))
+    await userEvent.type(screen.getByLabelText(/business name/i), 'Yuneekway')
+    await userEvent.type(screen.getByLabelText(/contact name/i), 'Balaji')
+    await userEvent.type(screen.getByLabelText(/contact phone/i), '9999999999')
+    await userEvent.click(screen.getByRole('button', { name: /submit booking request/i }))
+
+    expect(await screen.findByText(/organiser contact/i)).toBeInTheDocument()
+    expect(screen.getByText(/Organizer One/i)).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: /call organiser/i })).toHaveAttribute('href', 'tel:9000001001')
+    expect(screen.getByRole('link', { name: /whatsapp organiser/i })).toHaveAttribute('href', expect.stringContaining('9000001001'))
+  })
+
+  it('keeps vendor booking requests in notifications, not mixed into My Events', async () => {
+    localStorage.setItem('bys_token', 'organizer-token')
+    const myEventsPayload = { total: 1, items: [{ ...eventsPayload.items[0], organizer_id: 3, title: 'My Conducted Expo' }] }
+    const bookingPayload = [{ id: 99, event_id: 10, stall_id: 7, vendor_id: 2, booking_reference: 'BYS-CONNECT', status: 'pending', business_name: 'Yuneekway', contact_name: 'Balaji', contact_phone: '9999999999', organizer_contact_name: 'Test Organizer', organizer_contact_phone: '9000001001', vendor_contact_name: 'Balaji', vendor_contact_phone: '9999999999', notes: 'Vintage clothing stall', total_amount: 25000, created_at: '2026-05-10T00:00:00', updated_at: '2026-05-10T00:00:00' }]
+    const fetchMock = vi.fn((url: string) => {
+      if (url.includes('/auth/me')) return Promise.resolve(new Response(JSON.stringify({ id: 3, name: 'Test Organizer', email: 'testorganizer@example.com', phone: '9000001001', role: 'member', is_active: true, created_at: '2026-05-10T00:00:00' }), { status: 200 }))
+      if (url.includes('/events/mine')) return Promise.resolve(new Response(JSON.stringify(myEventsPayload), { status: 200 }))
+      if (url.includes('/bookings')) return Promise.resolve(new Response(JSON.stringify(bookingPayload), { status: 200 }))
+      if (url.includes('/events')) return Promise.resolve(new Response(JSON.stringify(eventsPayload), { status: 200 }))
+      return Promise.resolve(new Response('{}', { status: 404 }))
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(<App />)
+    await userEvent.click(screen.getByRole('link', { name: /my events/i }))
+    expect(await screen.findByText('My Conducted Expo')).toBeInTheDocument()
+    expect(screen.queryByText(/new booking requests/i)).not.toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: /call vendor/i })).not.toBeInTheDocument()
+
+    await userEvent.click(screen.getByRole('link', { name: /notifications/i }))
+    expect(await screen.findByText(/new booking requests/i)).toBeInTheDocument()
+    expect(screen.getByText(/Yuneekway/i)).toBeInTheDocument()
+    expect(screen.getByText(/Balaji/i)).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: /call vendor/i })).toHaveAttribute('href', 'tel:9999999999')
+    expect(screen.getByRole('link', { name: /whatsapp vendor/i })).toHaveAttribute('href', expect.stringContaining('9999999999'))
   })
 })

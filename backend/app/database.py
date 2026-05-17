@@ -35,6 +35,8 @@ def apply_sqlite_dev_migrations(db_engine: Engine) -> None:
         user_columns = _sqlite_column_names(db_engine, "users")
         if user_columns and "role" in user_columns:
             connection.execute(text("UPDATE users SET role = 'member' WHERE role IN ('organizer', 'vendor')"))
+        if user_columns and "phone_verified_at" not in user_columns:
+            connection.execute(text("ALTER TABLE users ADD COLUMN phone_verified_at DATETIME"))
 
         stall_columns = _sqlite_column_names(db_engine, "stalls")
         if stall_columns and "layout_image_url" not in stall_columns:

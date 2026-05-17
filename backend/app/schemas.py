@@ -18,8 +18,9 @@ class UserRead(BaseModel):
 
     id: int
     name: str
-    email: EmailStr
+    email: EmailStr | None
     phone: str | None
+    phone_verified_at: datetime | None = None
     role: str
     is_active: bool
     created_at: datetime
@@ -33,6 +34,27 @@ class LoginRequest(BaseModel):
 class TokenResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
+
+
+class OtpRequest(BaseModel):
+    phone: str = Field(min_length=10, max_length=20)
+
+
+class OtpRequestResponse(BaseModel):
+    challenge_id: str
+    expires_in_seconds: int
+    resend_after_seconds: int
+
+
+class OtpVerifyRequest(BaseModel):
+    challenge_id: str = Field(min_length=8, max_length=80)
+    phone: str = Field(min_length=10, max_length=20)
+    otp: str = Field(pattern="^[0-9]{4,8}$")
+
+
+class OtpTokenResponse(TokenResponse):
+    user: UserRead
+    is_new_user: bool
 
 
 class OrganizerProfileUpsert(BaseModel):
@@ -265,6 +287,10 @@ class BookingRead(BaseModel):
     contact_phone: str
     notes: str | None
     total_amount: Decimal
+    organizer_contact_name: str | None = None
+    organizer_contact_phone: str | None = None
+    vendor_contact_name: str | None = None
+    vendor_contact_phone: str | None = None
     created_at: datetime
     updated_at: datetime
 

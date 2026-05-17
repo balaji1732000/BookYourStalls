@@ -3,12 +3,28 @@ import { BrowserRouter, Link, Navigate, NavLink, Route, Routes, useNavigate, use
 import { Bell, CalendarDays, Heart, Home, LogIn, MapPin, Menu, Plus, Search, Store, UserPlus, Users } from 'lucide-react'
 import { apiClient, authStorage, type EventFilters } from './lib/api'
 import { compactNumber, formatDateParts, formatDateRange, formatINR } from './lib/format'
-import type { BookingCreate, EventCreate, EventDetail, EventItem, Stall, StallPackageCreate, User } from './types'
+import type { BookingCreate, BookingRead, EventCreate, EventDetail, EventItem, Stall, StallPackageCreate, User } from './types'
 
 const cities = ['Chennai', 'Bangalore', 'Mumbai', 'Delhi', 'Hyderabad', 'Coimbatore']
 const eventCategoryOptions = ['Shopping expo', 'Fashion pop-up', 'Thrift/vintage market', 'Food festival', 'Business expo', 'Handicrafts market']
-const vendorCategoryOptions = ['Clothing', 'Thrift/vintage clothing', 'Accessories', 'Food & beverages', 'Home decor', 'Handmade products']
+const quickSearchChips = [
+  { label: 'Thrift', filters: { category: 'Thrift/vintage market' } },
+  { label: 'Food', filters: { category: 'Food festival' } },
+  { label: 'Fashion', filters: { category: 'Fashion pop-up' } },
+  { label: 'Under ₹10k', filters: { max_stall_price: 10000 } },
+  { label: 'High footfall', filters: { min_footfall: 5000 } },
+] satisfies { label: string; filters: EventFilters }[]
 const crowdTypes = ['Families', 'Students', 'Corporate', 'Fashion shoppers', 'Collectors', 'General public']
+
+const LAST_BOOKING_KEY = 'bys_last_booking'
+
+function phoneDigits(phone: string) {
+  return phone.replace(/\D/g, '')
+}
+
+function whatsappLink(phone: string, message: string) {
+  return `https://wa.me/${phoneDigits(phone)}?text=${encodeURIComponent(message)}`
+}
 
 function Header({ user, onLogout }: { user: User | null; onLogout: () => void }) {
   return (
@@ -46,7 +62,7 @@ function Shell({ user, authLoading, setUser }: { user: User | null; authLoading:
           <Route path="/saved" element={<SavedPage savedEvents={savedEvents} savedIds={savedIds} onToggleSaved={toggleSavedEvent} />} />
           <Route path="/my-events" element={<MyEventsPage user={user} authLoading={authLoading} savedIds={savedIds} onToggleSaved={toggleSavedEvent} />} />
           <Route path="/menu" element={<MenuPage user={user} onLogout={logout} />} />
-          <Route path="/notifications" element={<NotificationsPage />} />
+          <Route path="/notifications" element={<NotificationsPage user={user} authLoading={authLoading} />} />
           <Route path="/events/new" element={<CreateEventPage user={user} authLoading={authLoading} />} />
           <Route path="/events/:eventId" element={<EventDetailPage user={user} authLoading={authLoading} />} />
           <Route path="/login" element={<LoginPage setUser={setUser} />} />
@@ -88,6 +104,15 @@ function MyEventsPage({ user, authLoading, savedIds, onToggleSaved }: { user: Us
   const [events, setEvents] = useState<EventItem[]>([])
   const [loading, setLoading] = useState(Boolean(user))
   const [error, setError] = useState<string | null>(null)
+  const lastBooking = useMemo(() => {
+    const stored = sessionStorage.getItem(LAST_BOOKING_KEY)
+    if (!stored) return null
+    try {
+      return JSON.parse(stored) as BookingRead
+    } catch {
+      return null
+    }
+  }, [])
 
   useEffect(() => {
     if (authLoading) return
@@ -109,7 +134,7 @@ function MyEventsPage({ user, authLoading, savedIds, onToggleSaved }: { user: Us
 
   return (
     <section className="page-stack">
-      {sessionStorage.getItem('bys_last_booking_reference') ? <section className="simple-page-card success-card" aria-live="polite"><div className="success-tick">✅</div><h2>Booking request submitted</h2><p>Reference {sessionStorage.getItem('bys_last_booking_reference')} is under review.</p></section> : null}
+      {lastBooking ? <BookingSuccessCard booking={lastBooking} /> : null}
       <section className="simple-page-card">
         <p className="eyebrow">Events you conduct</p>
         <h1>My conducted events</h1>
@@ -126,15 +151,99 @@ function MyEventsPage({ user, authLoading, savedIds, onToggleSaved }: { user: Us
   )
 }
 
-function NotificationsPage() {
+function BookingSuccessCard({ booking }: { booking: BookingRead }) {
+  const phone = booking.organizer_contact_phone
+  const organizerName = booking.organizer_contact_name ?? 'Event organiser'
+  return (
+    <section className="simple-page-card success-card" aria-live="polite">
+      <div className="success-tick">✅</div>
+      <h2>Booking request submitted</h2>
+      <p>Reference {booking.booking_reference} is under review.</p>
+      {phone ? <div className="contact-panel"><p className="eyebrow">Organiser contact</p><h3>{organizerName}</h3><p>{phone}</p><div className="contact-actions"><a className="primary-link" href={`tel:${phone}`}>Call organiser</a><a className="ghost-button" href={whatsappLink(phone, `Hi ${organizerName}, I submitted booking request ${booking.booking_reference} on BookYourStall.`)}>WhatsApp organiser</a></div></div> : null}
+    </section>
+  )
+}
+
+function BookingRequestsCard({ bookings }: { bookings: BookingRead[] }) {
+  return (
+    <section className="notifications-panel">
+      <div className="notifications-header">
+        <div>
+          <p className="eyebrow">New booking requests</p>
+          <h2>Vendor contacts</h2>
+          <p className="hero-copy">Review incoming stall requests and connect with vendors quickly.</p>
+        </div>
+        <span className="count-badge">{bookings.length} pending</span>
+      </div>
+      <div className="request-list">
+        {bookings.map((booking) => {
+          const phone = booking.vendor_contact_phone ?? booking.contact_phone
+          const name = booking.vendor_contact_name ?? booking.contact_name
+          const initials = (booking.business_name || name).slice(0, 2).toUpperCase()
+          return (
+            <article className="request-card" key={booking.id}>
+              <div className="request-topline">
+                <span className="vendor-avatar">{initials}</span>
+                <div className="request-title-block">
+                  <h3>{booking.business_name}</h3>
+                  <p>{booking.booking_reference}</p>
+                </div>
+                <span className="status-chip">{booking.status}</span>
+              </div>
+              <div className="contact-detail-grid">
+                <div><span>Contact person</span><strong>{name}</strong></div>
+                <div><span>Phone number</span><strong>{phone}</strong></div>
+              </div>
+              {booking.notes ? <p className="request-note">“{booking.notes}”</p> : null}
+              <div className="contact-actions">
+                <a className="primary-link" href={`tel:${phone}`}>Call vendor</a>
+                <a className="ghost-button" href={whatsappLink(phone, `Hi ${name}, I received your booking request ${booking.booking_reference} on BookYourStall.`)}>WhatsApp vendor</a>
+              </div>
+            </article>
+          )
+        })}
+      </div>
+    </section>
+  )
+}
+
+function NotificationsPage({ user, authLoading }: { user: User | null; authLoading: boolean }) {
+  const [bookings, setBookings] = useState<BookingRead[]>([])
+  const [loading, setLoading] = useState(Boolean(user))
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (authLoading) return
+    if (!user) return
+    let active = true
+    // This effect intentionally reflects a new async fetch cycle when auth is ready.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setLoading(true)
+    apiClient.listBookings()
+      .then((response) => {
+        if (!active) return
+        setBookings(response)
+        setError(null)
+      })
+      .catch((err: Error) => active && setError(err.message))
+      .finally(() => active && setLoading(false))
+    return () => { active = false }
+  }, [authLoading, user])
+
   return (
     <section className="page-stack">
       <section className="simple-page-card">
         <p className="eyebrow">Updates</p>
         <h1>Notifications</h1>
-        <p className="hero-copy">No new notifications. Booking updates and organizer replies will appear here.</p>
+        <p className="hero-copy">Booking requests and contact updates appear here.</p>
         <Link className="primary-link" to="/">Back to events</Link>
       </section>
+      {authLoading ? <p className="empty-state">Checking authentication...</p> : null}
+      {!authLoading && !user ? <section className="simple-page-card"><h2>Please login to view notifications</h2><p className="hero-copy">Vendor requests and contact updates are private to your account.</p><Link className="primary-link" to="/login">Login</Link></section> : null}
+      {!authLoading && user && loading ? <p className="empty-state">Loading notifications...</p> : null}
+      {error ? <p className="alert error">{error}</p> : null}
+      {!authLoading && user && !loading && !error && bookings.length === 0 ? <p className="empty-state">No new booking requests yet.</p> : null}
+      {!authLoading && user && !loading && !error && bookings.length > 0 ? <BookingRequestsCard bookings={bookings} /> : null}
     </section>
   )
 }
@@ -165,6 +274,7 @@ function MenuPage({ user, onLogout }: { user: User | null; onLogout: () => void 
 
 function EventsPage({ savedIds, onToggleSaved }: { savedIds: Set<number>; onToggleSaved: (event: EventItem) => void }) {
   const [filters, setFilters] = useState<EventFilters>({})
+  const [searchQuery, setSearchQuery] = useState('')
   const [events, setEvents] = useState<EventItem[]>([])
   const [total, setTotal] = useState(0)
   const [loading, setLoading] = useState(true)
@@ -193,40 +303,91 @@ function EventsPage({ savedIds, onToggleSaved }: { savedIds: Set<number>; onTogg
   }, [filters])
 
   const eventCountText = `${total} ${total === 1 ? 'event' : 'events'} available`
+  const selectedFilters = [
+    filters.q ? { key: 'q' as const, label: filters.q } : null,
+    filters.city ? { key: 'city' as const, label: filters.city } : null,
+    filters.category ? { key: 'category' as const, label: filters.category } : null,
+    filters.max_stall_price ? { key: 'max_stall_price' as const, label: `Under ${formatINR(filters.max_stall_price)}` } : null,
+    filters.min_stall_price ? { key: 'min_stall_price' as const, label: `From ${formatINR(filters.min_stall_price)}` } : null,
+    filters.min_footfall ? { key: 'min_footfall' as const, label: `${compactNumber(filters.min_footfall)}+ footfall` } : null,
+  ].filter(Boolean) as { key: keyof EventFilters; label: string }[]
+  const applyQuickFilters = (quickFilters: EventFilters) => {
+    setFilters((current) => ({ ...current, ...quickFilters }))
+  }
+  const removeFilter = (key: keyof EventFilters) => {
+    if (key === 'q') setSearchQuery('')
+    setFilters((current) => ({ ...current, [key]: undefined }))
+  }
+  const resetFilters = () => {
+    setSearchQuery('')
+    setFilters({})
+  }
+  const updateSearchQuery = (value: string) => {
+    setSearchQuery(value)
+    setFilters((current) => ({ ...current, q: value.trim().replace(/\s+/g, ' ') || undefined }))
+  }
 
   return (
     <section className="page-stack">
-      <section className="hero-section">
+      <section className="hero-section search-first-hero">
         <div>
           <p className="eyebrow">India’s stall booking marketplace</p>
           <h1>Book your perfect stall</h1>
-          <p className="hero-copy">Discover exhibitions, flea markets, expos and pop-ups by city, crowd, category and stall price.</p>
+          <p className="hero-copy">Search events by city, category, vendor type, custom tags and stall budget.</p>
         </div>
-        <div className="search-card">
-          <label htmlFor="search-city">Find events by city</label>
-          <div className="search-row"><Search size={18} /><input id="search-city" placeholder="Try Chennai" value={filters.city ?? ''} onChange={(event) => setFilters((current) => ({ ...current, city: event.target.value.trim() || undefined }))} /></div>
+        <div className="search-card search-card-primary">
+          <label htmlFor="search-query">Search events, city, category or vendor type</label>
+          <div className="search-row"><Search size={18} /><input id="search-query" placeholder="Try Chennai thrift, food under 10000..." value={searchQuery} onChange={(event) => updateSearchQuery(event.target.value)} /></div>
         </div>
       </section>
 
-      <section className="filter-panel" aria-label="Event filters">
-        <div className="city-strip">
+      <section className="filter-panel marketplace-filters" aria-label="Event filters">
+        <div className="filter-panel-head">
+          <div>
+            <p className="eyebrow">Quick filters</p>
+            <h2>Browse by location, category and budget</h2>
+          </div>
+          <button className="filter-clear" type="button" onClick={resetFilters}>Reset</button>
+        </div>
+        <div className="city-strip" aria-label="Popular cities">
           {cities.map((city) => (
             <button key={city} className={filters.city === city ? 'city-chip active' : 'city-chip'} onClick={() => setFilters((current) => ({ ...current, city: current.city === city ? undefined : city }))}>
-              <span>{city.slice(0, 1)}</span>{city}
+              <span>{city.slice(0, 1)}</span><strong>{city}</strong>
             </button>
           ))}
         </div>
-        <div className="filter-row">
-          <select aria-label="Category" onChange={(event) => setFilters((current) => ({ ...current, category: event.target.value || undefined }))}>
-            <option value="">All categories</option>
-            {eventCategoryOptions.map((category) => <option key={category} value={category}>{category}</option>)}
-          </select>
-          <select aria-label="Price" onChange={(event) => setFilters((current) => ({ ...current, min_stall_price: event.target.value ? Number(event.target.value) : undefined }))}>
-            <option value="">Any price</option>
-            <option value="10000">From ₹10,000</option>
-            <option value="25000">From ₹25,000</option>
-          </select>
+        <div className="quick-chip-row" aria-label="Popular searches">
+          {quickSearchChips.map((chip) => (
+            <button key={chip.label} className="quick-filter-chip" type="button" onClick={() => applyQuickFilters(chip.filters)}>{chip.label}</button>
+          ))}
         </div>
+        {selectedFilters.length > 0 ? (
+          <div className="selected-filter-row" aria-label="Selected filters">
+            {selectedFilters.map((filter) => (
+              <button key={filter.key} className="selected-filter-chip" type="button" aria-label={`Remove ${filter.label} filter`} onClick={() => removeFilter(filter.key)}>{filter.label} ×</button>
+            ))}
+          </div>
+        ) : null}
+        <details className="advanced-filters">
+          <summary>More filters</summary>
+          <div className="filter-row">
+            <label className="filter-select-card">
+              <span>Category</span>
+              <select aria-label="Category" value={filters.category ?? ''} onChange={(event) => setFilters((current) => ({ ...current, category: event.target.value || undefined }))}>
+                <option value="">All categories</option>
+                {eventCategoryOptions.map((category) => <option key={category} value={category}>{category}</option>)}
+              </select>
+            </label>
+            <label className="filter-select-card">
+              <span>Stall price</span>
+              <select aria-label="Price" value={filters.max_stall_price ?? ''} onChange={(event) => setFilters((current) => ({ ...current, max_stall_price: event.target.value ? Number(event.target.value) : undefined }))}>
+                <option value="">Any price</option>
+                <option value="10000">Under ₹10,000</option>
+                <option value="25000">Under ₹25,000</option>
+              </select>
+            </label>
+          </div>
+        </details>
       </section>
 
       <div className="section-heading">
@@ -235,7 +396,7 @@ function EventsPage({ savedIds, onToggleSaved }: { savedIds: Set<number>; onTogg
       </div>
 
       {error ? <p className="alert error">{error}</p> : null}
-      {!loading && events.length === 0 ? <p className="empty-state">No events found. Try another city or category.</p> : null}
+      {!loading && events.length === 0 ? <p className="empty-state">No events found. Try another city, category, search term or price.</p> : null}
       <div className="event-grid">
         {events.map((event) => <EventCard key={event.id} event={event} saved={savedIds.has(event.id)} onToggleSaved={onToggleSaved} />)}
       </div>
@@ -261,17 +422,28 @@ function EventCard({ event, saved, onToggleSaved }: { event: EventItem; saved: b
 
 function CreateEventPage({ user, authLoading }: { user: User | null; authLoading: boolean }) {
   const navigate = useNavigate()
-  const [form, setForm] = useState<EventCreate>({ title: '', description: '', city: '', venue_name: '', venue_address: '', start_date: '', end_date: '', crowd_type: '', expected_footfall: null, category: null, categories: [], allowed_vendor_categories: [] })
+  const [form, setForm] = useState<EventCreate>({ title: '', description: '', city: '', venue_name: '', venue_address: '', start_date: '', end_date: '', crowd_type: '', expected_footfall: null, category: null, categories: [] })
+  const [customCategory, setCustomCategory] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
   const canCreate = Boolean(user)
   const update = (field: keyof EventCreate, value: string) => setForm((current) => ({ ...current, [field]: field === 'expected_footfall' ? (value ? Number(value) : null) : value }))
-  const toggleListValue = (field: 'categories' | 'allowed_vendor_categories', value: string) => {
+  const visibleCategoryOptions = useMemo(() => {
+    const customOnly = form.categories.filter((category) => !eventCategoryOptions.includes(category))
+    return [...eventCategoryOptions, ...customOnly]
+  }, [form.categories])
+  const toggleListValue = (field: 'categories', value: string) => {
     setForm((current) => {
       const selected = current[field]
       return { ...current, [field]: selected.includes(value) ? selected.filter((item) => item !== value) : [...selected, value] }
     })
+  }
+  const addCustomCategory = () => {
+    const cleaned = customCategory.trim().replace(/\s+/g, ' ')
+    if (!cleaned) return
+    setForm((current) => ({ ...current, categories: current.categories.includes(cleaned) ? current.categories : [...current.categories, cleaned] }))
+    setCustomCategory('')
   }
 
   const submit = async (event: FormEvent) => {
@@ -286,21 +458,25 @@ function CreateEventPage({ user, authLoading }: { user: User | null; authLoading
       setError('Select at least one event category.')
       return
     }
-    if (form.allowed_vendor_categories.length === 0) {
-      setError('Select at least one allowed vendor category.')
-      return
-    }
     try {
       setSubmitting(true)
       setError(null)
       setSuccess(null)
-      const created = await apiClient.createEvent({
-        ...form,
+      const eventPayload = {
+        title: form.title,
+        city: form.city,
+        venue_name: form.venue_name,
+        start_date: form.start_date,
+        end_date: form.end_date,
+        crowd_type: form.crowd_type,
+        categories: form.categories,
         category: form.categories[0],
         description: form.description || null,
         venue_address: form.venue_address || null,
         expected_footfall: form.expected_footfall ?? null,
-      })
+        banner_image_url: form.banner_image_url || null,
+      }
+      const created = await apiClient.createEvent(eventPayload)
       await apiClient.publishEvent(created.id)
       navigate('/')
     } catch (err) {
@@ -312,24 +488,47 @@ function CreateEventPage({ user, authLoading }: { user: User | null; authLoading
 
   return (
     <section className="page-stack">
-      <form className="auth-card event-form" onSubmit={submit}>
-        <h1>Create event</h1>
+      <form className="event-builder" aria-label="Create event" onSubmit={submit}>
+        <div className="form-hero-card">
+          <p className="eyebrow">Organizer setup</p>
+          <h1>Create event</h1>
+          <p>Set the basics first. You can add stall packages with prices after the event is created.</p>
+        </div>
         {authLoading ? <p className="alert">Checking authentication...</p> : null}
         {!authLoading && !canCreate ? <p className="alert error">Please login before creating events.</p> : null}
         {error ? <p className="alert error">{error}</p> : null}
         {success ? <p className="alert success">{success}</p> : null}
-        <label>Title<input value={form.title} onChange={(event) => update('title', event.target.value)} required minLength={2} /></label>
-        <label>Description<textarea value={form.description ?? ''} onChange={(event) => update('description', event.target.value)} /></label>
-        <label>City<select value={form.city} onChange={(event) => update('city', event.target.value)} required><option value="">Select city</option>{cities.map((city) => <option key={city} value={city}>{city}</option>)}</select></label>
-        <label>Venue name<input value={form.venue_name} onChange={(event) => update('venue_name', event.target.value)} required minLength={2} /></label>
-        <label>Venue address<textarea value={form.venue_address ?? ''} onChange={(event) => update('venue_address', event.target.value)} /></label>
-        <label>Start date<input type="date" value={form.start_date} onChange={(event) => update('start_date', event.target.value)} required /></label>
-        <label>End date<input type="date" value={form.end_date} onChange={(event) => update('end_date', event.target.value)} required /></label>
-        <label>Crowd type<select value={form.crowd_type} onChange={(event) => update('crowd_type', event.target.value)} required><option value="">Select crowd</option>{crowdTypes.map((crowdType) => <option key={crowdType} value={crowdType}>{crowdType}</option>)}</select></label>
-        <label>Expected footfall<input type="number" min="0" value={form.expected_footfall ?? ''} onChange={(event) => update('expected_footfall', event.target.value)} /></label>
-        <fieldset className="option-fieldset"><legend>Event categories</legend>{eventCategoryOptions.map((category) => <label key={category} className="checkbox-option"><input type="checkbox" checked={form.categories.includes(category)} onChange={() => toggleListValue('categories', category)} />{category}</label>)}</fieldset>
-        <fieldset className="option-fieldset"><legend>Allowed vendor categories</legend>{vendorCategoryOptions.map((category) => <label key={category} className="checkbox-option"><input type="checkbox" checked={form.allowed_vendor_categories.includes(category)} onChange={() => toggleListValue('allowed_vendor_categories', category)} />{category}</label>)}</fieldset>
-        <button className="primary-button" type="submit" disabled={authLoading || submitting}>{submitting ? 'Creating...' : 'Create event'}</button>
+        <section className="form-step-card">
+          <div className="step-heading"><span>1</span><div><h2>Event basics</h2><p>Name, location, date and audience details.</p></div></div>
+          <div className="responsive-form-grid">
+            <label className="span-2">Title<input value={form.title} onChange={(event) => update('title', event.target.value)} required minLength={2} placeholder="Example: Chennai Thrift Fest" /></label>
+            <label className="span-2">Description<textarea value={form.description ?? ''} onChange={(event) => update('description', event.target.value)} placeholder="Tell vendors what makes this event worth joining" /></label>
+            <label>City<select value={form.city} onChange={(event) => update('city', event.target.value)} required><option value="">Select city</option>{cities.map((city) => <option key={city} value={city}>{city}</option>)}</select></label>
+            <label>Venue name<input value={form.venue_name} onChange={(event) => update('venue_name', event.target.value)} required minLength={2} placeholder="Venue / mall / ground name" /></label>
+            <label className="span-2">Venue address<textarea value={form.venue_address ?? ''} onChange={(event) => update('venue_address', event.target.value)} placeholder="Full address for vendors" /></label>
+            <label>Start date<input type="date" value={form.start_date} onChange={(event) => update('start_date', event.target.value)} required /></label>
+            <label>End date<input type="date" value={form.end_date} onChange={(event) => update('end_date', event.target.value)} required /></label>
+            <label>Crowd type<select value={form.crowd_type} onChange={(event) => update('crowd_type', event.target.value)} required><option value="">Select crowd</option>{crowdTypes.map((crowdType) => <option key={crowdType} value={crowdType}>{crowdType}</option>)}</select></label>
+            <label>Expected footfall<input type="number" min="0" value={form.expected_footfall ?? ''} onChange={(event) => update('expected_footfall', event.target.value)} placeholder="Example: 5000" /></label>
+          </div>
+        </section>
+        <section className="form-step-card">
+          <div className="step-heading"><span>2</span><div><h2>Event type</h2><p>Choose what kind of event this is. This helps vendors discover it.</p></div></div>
+          <fieldset className="chip-fieldset">
+            <legend className="sr-only">Event categories</legend>
+            <div className="category-chip-grid">
+              {visibleCategoryOptions.map((category) => <label key={category} className="category-chip"><input type="checkbox" checked={form.categories.includes(category)} onChange={() => toggleListValue('categories', category)} /><span>{category}</span></label>)}
+            </div>
+            <div className="custom-category-row">
+              <label>Add custom event category<input value={customCategory} onChange={(event) => setCustomCategory(event.target.value)} placeholder="Example: Vintage sneaker meetup" /></label>
+              <button className="ghost-button" type="button" onClick={addCustomCategory}>Add category</button>
+            </div>
+          </fieldset>
+        </section>
+        <div className="form-submit-bar">
+          <div><strong>Ready to publish?</strong><p>You can create stall packages on the event page next.</p></div>
+          <button className="primary-button" type="submit" disabled={authLoading || submitting}>{submitting ? 'Creating...' : 'Create event'}</button>
+        </div>
       </form>
     </section>
   )
@@ -427,7 +626,7 @@ function EventDetailPage({ user, authLoading }: { user: User | null; authLoading
       <div className="stall-grid">
         {stallGroups.map((group) => <StallPackageCard key={group.key} group={group} isOwner={isOwner} onSelect={setSelectedStall} />)}
       </div>
-      {selectedStall ? <BookingForm eventId={event.id} stall={selectedStall} user={user} authLoading={authLoading} onSuccess={(reference) => { setSelectedStall(null); sessionStorage.setItem('bys_last_booking_reference', reference ?? 'created'); setSuccess(`Reference ${reference ?? 'created'} is under review. Redirecting to your conducted events...`); navigate('/my-events') }} /> : null}
+      {selectedStall ? <BookingForm eventId={event.id} stall={selectedStall} user={user} authLoading={authLoading} onSuccess={(booking) => { setSelectedStall(null); sessionStorage.setItem(LAST_BOOKING_KEY, JSON.stringify(booking)); sessionStorage.setItem('bys_last_booking_reference', booking.booking_reference); setSuccess(`Reference ${booking.booking_reference} is under review. Redirecting to your conducted events...`); navigate('/my-events') }} /> : null}
     </section>
   )
 }
@@ -485,7 +684,7 @@ function StallPackageForm({ eventId, onGenerated }: { eventId: number; onGenerat
   )
 }
 
-function BookingForm({ eventId, stall, user, authLoading, onSuccess }: { eventId: number; stall: Stall; user: User | null; authLoading: boolean; onSuccess: (reference?: string) => void }) {
+function BookingForm({ eventId, stall, user, authLoading, onSuccess }: { eventId: number; stall: Stall; user: User | null; authLoading: boolean; onSuccess: (booking: BookingRead) => void }) {
   const [form, setForm] = useState({ business_name: '', contact_name: '', contact_phone: '', notes: '' })
   const [error, setError] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
@@ -508,7 +707,7 @@ function BookingForm({ eventId, stall, user, authLoading, onSuccess }: { eventId
       setSubmitting(true)
       setError(null)
       const booking = await apiClient.createBooking(payload)
-      onSuccess(booking.booking_reference)
+      onSuccess(booking)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Booking failed')
     } finally {
@@ -517,38 +716,99 @@ function BookingForm({ eventId, stall, user, authLoading, onSuccess }: { eventId
   }
 
   return (
-    <form className="booking-form" onSubmit={submit}>
-      <div className="section-heading"><h2>Request {stall.title}</h2><p>{formatINR(stall.price)} · pending organizer approval</p></div>
+    <form className="booking-panel" aria-label="Request stall booking" onSubmit={submit}>
+      <div className="booking-summary-card">
+        <p className="eyebrow">Selected package</p>
+        <div className="booking-summary-main">
+          <div>
+            <h2>Request {stall.title}</h2>
+            <p>{stall.zone ?? 'General zone'} · {stall.size ?? 'Size shared by organizer'}</p>
+          </div>
+          <strong>{formatINR(stall.price)}</strong>
+        </div>
+        <div className="summary-note">Pending organizer approval. After you submit, the organizer can contact you directly.</div>
+      </div>
       {authLoading ? <p className="alert">Checking authentication...</p> : null}
       {error ? <p className="alert error">{error}</p> : null}
-      <label>Business name<input value={form.business_name} onChange={(event) => update('business_name', event.target.value)} required minLength={2} /></label>
-      <label>Contact name<input value={form.contact_name} onChange={(event) => update('contact_name', event.target.value)} required minLength={2} /></label>
-      <label>Contact phone<input value={form.contact_phone} onChange={(event) => update('contact_phone', event.target.value)} required minLength={5} /></label>
-      <label>Notes<textarea value={form.notes} onChange={(event) => update('notes', event.target.value)} placeholder="Products, stall needs, timing questions" /></label>
-      <button className="primary-button" type="submit" disabled={authLoading || submitting}>{authLoading ? 'Checking authentication...' : submitting ? 'Submitting...' : 'Submit booking request'}</button>
+      <section className="booking-detail-card">
+        <div className="step-heading compact"><span>1</span><div><h2>Your business details</h2><p>Share the contact the organiser should call or WhatsApp.</p></div></div>
+        <div className="responsive-form-grid">
+          <label>Business name<input value={form.business_name} onChange={(event) => update('business_name', event.target.value)} required minLength={2} placeholder="Example: Yuneekway" /></label>
+          <label>Contact name<input value={form.contact_name} onChange={(event) => update('contact_name', event.target.value)} required minLength={2} placeholder="Person to contact" /></label>
+          <label className="span-2">Contact phone<input value={form.contact_phone} onChange={(event) => update('contact_phone', event.target.value)} required minLength={5} placeholder="Mobile / WhatsApp number" /></label>
+          <label className="span-2">Notes<textarea value={form.notes} onChange={(event) => update('notes', event.target.value)} placeholder="Products, stall needs, timing questions" /></label>
+        </div>
+      </section>
+      <div className="form-submit-bar booking-submit-bar">
+        <div><strong>Submit request</strong><p>Your number will be shared with the organiser for faster connection.</p></div>
+        <button className="primary-button" type="submit" disabled={authLoading || submitting}>{authLoading ? 'Checking authentication...' : submitting ? 'Submitting...' : 'Submit booking request'}</button>
+      </div>
     </form>
   )
 }
 
 function LoginPage({ setUser }: { setUser: (user: User | null) => void }) {
   const navigate = useNavigate()
-  const [email, setEmail] = useState('')
-  const [password, setPassword] = useState('')
+  const [phone, setPhone] = useState('')
+  const [otp, setOtp] = useState('')
+  const [challengeId, setChallengeId] = useState<string | null>(null)
+  const [otpSent, setOtpSent] = useState(false)
+  const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  const submit = async (event: FormEvent) => {
+  const requestOtp = async (event: FormEvent) => {
     event.preventDefault()
+    setLoading(true)
+    setError(null)
     try {
-      await apiClient.login({ email, password })
-      const me = await apiClient.me()
-      setUser(me)
-      navigate('/')
+      const response = await apiClient.requestOtp({ phone })
+      setChallengeId(response.challenge_id)
+      setOtpSent(true)
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Login failed')
+      setError(err instanceof Error ? err.message : 'Could not send OTP')
+    } finally {
+      setLoading(false)
     }
   }
 
-  return <AuthForm title="Login" error={error} onSubmit={submit} email={email} setEmail={setEmail} password={password} setPassword={setPassword} />
+  const verifyOtp = async (event: FormEvent) => {
+    event.preventDefault()
+    if (!challengeId) return
+    setLoading(true)
+    setError(null)
+    try {
+      const response = await apiClient.verifyOtp({ challenge_id: challengeId, phone, otp })
+      setUser(response.user)
+      navigate('/')
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'OTP verification failed')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  return (
+    <section className="auth-card otp-auth-card">
+      <p className="eyebrow">Phone login</p>
+      <h1>Login or create account</h1>
+      <p className="helper-text">We’ll send a real SMS OTP to your mobile number and keep your session active after verification.</p>
+      {error ? <p className="alert error">{error}</p> : null}
+      {!otpSent ? (
+        <form onSubmit={requestOtp} className="otp-auth-form">
+          <label>Mobile number<input inputMode="tel" autoComplete="tel" value={phone} onChange={(event) => setPhone(event.target.value)} placeholder="98765 43210" required minLength={10} /></label>
+          <button className="primary-button" type="submit" disabled={loading}>{loading ? 'Sending OTP…' : 'Send OTP'}</button>
+        </form>
+      ) : (
+        <form onSubmit={verifyOtp} className="otp-auth-form">
+          <p className="success-note">OTP sent to {phone}</p>
+          <label>Enter OTP<input inputMode="numeric" autoComplete="one-time-code" value={otp} onChange={(event) => setOtp(event.target.value)} placeholder="6-digit code" required minLength={4} maxLength={8} /></label>
+          <button className="primary-button" type="submit" disabled={loading}>{loading ? 'Verifying…' : 'Verify & continue'}</button>
+          <button className="ghost-button" type="button" onClick={() => { setOtpSent(false); setOtp(''); setChallengeId(null) }}>Change number</button>
+        </form>
+      )}
+      <Link to="/register">Use email registration instead</Link>
+    </section>
+  )
 }
 
 function RegisterPage({ setUser }: { setUser: (user: User | null) => void }) {
@@ -582,19 +842,6 @@ function RegisterPage({ setUser }: { setUser: (user: User | null) => void }) {
       <label>Password<input type="password" value={password} onChange={(event) => setPassword(event.target.value)} required minLength={8} /></label>
       <button className="primary-button" type="submit">Register</button>
       <Link to="/login">Already have an account?</Link>
-    </form>
-  )
-}
-
-function AuthForm({ title, error, onSubmit, email, setEmail, password, setPassword }: { title: string; error: string | null; onSubmit: (event: FormEvent) => void; email: string; setEmail: (value: string) => void; password: string; setPassword: (value: string) => void }) {
-  return (
-    <form className="auth-card" onSubmit={onSubmit}>
-      <h1>{title}</h1>
-      {error ? <p className="alert error">{error}</p> : null}
-      <label>Email<input type="email" value={email} onChange={(event) => setEmail(event.target.value)} required /></label>
-      <label>Password<input type="password" value={password} onChange={(event) => setPassword(event.target.value)} required /></label>
-      <button className="primary-button" type="submit">Login</button>
-      <Link to="/register">Create vendor or organizer account</Link>
     </form>
   )
 }

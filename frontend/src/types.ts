@@ -3,8 +3,9 @@ export type UserRole = 'member' | 'super_admin'
 export interface User {
   id: number
   name: string
-  email: string
+  email: string | null
   phone: string | null
+  phone_verified_at?: string | null
   role: UserRole
   is_active: boolean
   created_at: string
@@ -43,7 +44,7 @@ export interface EventCreate {
   expected_footfall?: number | null
   category?: string | null
   categories: string[]
-  allowed_vendor_categories: string[]
+  allowed_vendor_categories?: string[]
   banner_image_url?: string | null
 }
 
@@ -100,6 +101,10 @@ export interface BookingRead extends BookingCreate {
   booking_reference: string
   status: string
   total_amount: number
+  organizer_contact_name?: string | null
+  organizer_contact_phone?: string | null
+  vendor_contact_name?: string | null
+  vendor_contact_phone?: string | null
   created_at: string
   updated_at: string
 }

@@ -54,6 +54,59 @@ def test_organizer_and_vendor_can_upsert_and_read_profiles(client):
     assert member_vendor_profile.json()["business_name"] == "Expo Makers Merch"
 
 
+def test_event_discovery_searches_query_across_title_city_categories_and_vendor_types(client):
+    register(client, "Organizer Search", "search-org@example.com", "organizer")
+    org_headers = login(client, "search-org@example.com")
+
+    thrift_event = client.post(
+        "/api/v1/events",
+        headers=org_headers,
+        json={
+            "title": "Vintage Sneaker Meetup",
+            "description": "Curated pre-loved streetwear and sneaker stalls.",
+            "city": "Chennai",
+            "venue_name": "T Nagar Social Hall",
+            "start_date": "2026-10-01",
+            "end_date": "2026-10-02",
+            "crowd_type": "Gen Z shoppers",
+            "expected_footfall": 3000,
+            "categories": ["Thrift/vintage market", "Vintage sneaker meetup"],
+            "allowed_vendor_categories": ["Thrift/vintage clothing", "Sneakers", "Accessories"],
+        },
+    ).json()
+    food_event = client.post(
+        "/api/v1/events",
+        headers=org_headers,
+        json={
+            "title": "Organic Food Bazaar",
+            "description": "Healthy food brands and dessert counters.",
+            "city": "Bangalore",
+            "venue_name": "Indiranagar Grounds",
+            "start_date": "2026-10-05",
+            "end_date": "2026-10-06",
+            "crowd_type": "Families",
+            "expected_footfall": 5000,
+            "categories": ["Food festival", "Organic food bazaar"],
+            "allowed_vendor_categories": ["Food & beverages", "Desserts"],
+        },
+    ).json()
+    for event in (thrift_event, food_event):
+        client.post(f"/api/v1/events/{event['id']}/publish", headers=org_headers)
+
+    sneaker_response = client.get("/api/v1/events?q=sneaker")
+    assert sneaker_response.status_code == 200
+    assert [item["title"] for item in sneaker_response.json()["items"]] == ["Vintage Sneaker Meetup"]
+
+    food_response = client.get("/api/v1/events?q=dessert")
+    assert food_response.status_code == 200
+    assert [item["title"] for item in food_response.json()["items"]] == ["Organic Food Bazaar"]
+
+    city_and_category_response = client.get("/api/v1/events?q=chennai thrift")
+    assert city_and_category_response.status_code == 200
+    assert [item["title"] for item in city_and_category_response.json()["items"]] == ["Vintage Sneaker Meetup"]
+
+
+
 def test_event_discovery_filters_by_stall_price_and_footfall(client):
     register(client, "Organizer One", "org@example.com", "organizer")
     org_headers = login(client, "org@example.com")

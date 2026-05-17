@@ -54,6 +54,28 @@ def _event_matches_list_field(event: Event, field_name: str, expected: str) -> b
     return expected in values
 
 
+def _event_search_text(event: Event) -> str:
+    parts = [
+        event.title,
+        event.description,
+        event.city,
+        event.venue_name,
+        event.crowd_type,
+        event.category,
+        *_loads_json_list(event.categories),
+        *_loads_json_list(event.allowed_vendor_categories),
+    ]
+    return " ".join(part.lower() for part in parts if part)
+
+
+def _event_matches_query(event: Event, query_text: str) -> bool:
+    tokens = [token.strip().lower() for token in query_text.split() if token.strip()]
+    if not tokens:
+        return True
+    haystack = _event_search_text(event)
+    return all(token in haystack for token in tokens)
+
+
 @router.post("", response_model=EventRead, status_code=status.HTTP_201_CREATED)
 def create_event(
     payload: EventCreate,
@@ -79,6 +101,7 @@ def create_event(
 @router.get("", response_model=EventList)
 def list_events(
     db: DbSession,
+    q: str | None = None,
     city: str | None = None,
     crowd_type: str | None = None,
     category: str | None = None,
@@ -122,6 +145,8 @@ def list_events(
         all_items = [event for event in all_items if event.category == category or _event_matches_list_field(event, "categories", category)]
     if vendor_category:
         all_items = [event for event in all_items if _event_matches_list_field(event, "allowed_vendor_categories", vendor_category)]
+    if q:
+        all_items = [event for event in all_items if _event_matches_query(event, q)]
     return EventList(items=all_items[offset : offset + limit], total=len(all_items))
 
 
