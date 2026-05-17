@@ -24,6 +24,17 @@ class TwoFactorOtpProvider:
         self.api_key = api_key or settings.twofactor_api_key
         self.template_name = template_name or settings.twofactor_template_name
 
+    def _format_sms_phone(self, phone: str) -> str:
+        """2Factor's Indian SMS OTP route expects a 10-digit mobile number.
+
+        We store Indian phones internally in normalized 91XXXXXXXXXX format so one
+        user cannot create duplicate accounts with +91/0/local variants. For the
+        provider call, strip the country code for Indian numbers only.
+        """
+        if len(phone) == 12 and phone.startswith("91"):
+            return phone[2:]
+        return phone
+
     def _request_json(self, path: str) -> dict:
         if not self.api_key:
             raise HTTPException(
@@ -49,7 +60,8 @@ class TwoFactorOtpProvider:
             ) from exc
 
     def request_otp(self, phone: str) -> str:
-        path = f"SMS/{quote(phone, safe='')}/AUTOGEN"
+        sms_phone = self._format_sms_phone(phone)
+        path = f"SMS/{quote(sms_phone, safe='')}/AUTOGEN"
         if self.template_name:
             path = f"{path}/{quote(self.template_name, safe='')}"
         payload = self._request_json(path)

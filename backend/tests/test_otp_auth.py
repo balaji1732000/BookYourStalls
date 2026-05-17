@@ -1,13 +1,29 @@
 def test_phone_otp_request_sends_sms_without_exposing_code(client, otp_provider):
     response = client.post("/api/v1/auth/otp/request", json={"phone": "98765 43210"})
 
-    assert response.status_code == 200, response.text
+    assert response.status_code == 200
     body = response.json()
     assert body["challenge_id"]
     assert body["expires_in_seconds"] == 300
     assert body["resend_after_seconds"] == 45
     assert "otp" not in body
     assert otp_provider.sent == [{"phone": "919876543210", "session_id": "fake-session-1"}]
+
+
+def test_twofactor_provider_sends_indian_numbers_without_country_code(monkeypatch):
+    from app.sms import TwoFactorOtpProvider
+
+    captured = {}
+
+    def fake_request_json(self, path):
+        captured["path"] = path
+        return {"Status": "Success", "Details": "provider-session"}
+
+    monkeypatch.setattr(TwoFactorOtpProvider, "_request_json", fake_request_json)
+    provider = TwoFactorOtpProvider(api_key="test-key")
+
+    assert provider.request_otp("919876543210") == "provider-session"
+    assert captured["path"] == "SMS/9876543210/AUTOGEN"
 
 
 def test_phone_otp_verify_creates_member_session_and_authenticates_me(client, otp_provider):
