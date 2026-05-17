@@ -31,9 +31,12 @@ class TwoFactorOtpProvider:
         user cannot create duplicate accounts with +91/0/local variants. For the
         provider call, strip the country code for Indian numbers only.
         """
-        if len(phone) == 12 and phone.startswith("91"):
-            return phone[2:]
-        return phone
+        digits = "".join(char for char in phone if char.isdigit())
+        if len(digits) == 12 and digits.startswith("91"):
+            return digits[2:]
+        if len(digits) == 11 and digits.startswith("0"):
+            return digits[1:]
+        return digits
 
     def _request_json(self, path: str) -> dict:
         if not self.api_key:

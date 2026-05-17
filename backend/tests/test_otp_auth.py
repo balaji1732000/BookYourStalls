@@ -22,7 +22,11 @@ def test_twofactor_provider_sends_indian_numbers_without_country_code(monkeypatc
     monkeypatch.setattr(TwoFactorOtpProvider, "_request_json", fake_request_json)
     provider = TwoFactorOtpProvider(api_key="test-key")
 
-    assert provider.request_otp("919876543210") == "provider-session"
+    assert provider._format_sms_phone("919876543210") == "9876543210"
+    assert provider._format_sms_phone("+91 98765 43210") == "9876543210"
+    assert provider._format_sms_phone("09876543210") == "9876543210"
+    assert provider._format_sms_phone("9876543210") == "9876543210"
+    assert provider.request_otp("+91 98765 43210") == "provider-session"
     assert captured["path"] == "SMS/9876543210/AUTOGEN"
 
 
