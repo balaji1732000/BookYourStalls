@@ -77,7 +77,12 @@ class TwoFactorOtpProvider:
 
     def verify_otp(self, session_id: str, otp: str) -> bool:
         path = f"SMS/VERIFY/{quote(session_id, safe='')}/{quote(otp, safe='')}"
-        payload = self._request_json(path)
+        try:
+            payload = self._request_json(path)
+        except HTTPException as exc:
+            if str(exc.detail).lower() in {"otp mismatch", "session expired", "invalid session", "otp expired"}:
+                return False
+            raise
         return payload.get("Status") == "Success" and payload.get("Details") == "OTP Matched"
 
 

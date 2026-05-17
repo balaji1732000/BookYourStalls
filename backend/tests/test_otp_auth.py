@@ -30,6 +30,20 @@ def test_twofactor_provider_sends_indian_numbers_without_country_code(monkeypatc
     assert captured["path"] == "SMS/9876543210/AUTOGEN"
 
 
+def test_twofactor_provider_treats_otp_mismatch_as_failed_verification(monkeypatch):
+    from fastapi import HTTPException
+
+    from app.sms import TwoFactorOtpProvider
+
+    def fake_request_json(self, path):
+        raise HTTPException(status_code=502, detail="OTP Mismatch")
+
+    monkeypatch.setattr(TwoFactorOtpProvider, "_request_json", fake_request_json)
+    provider = TwoFactorOtpProvider(api_key="test-key")
+
+    assert provider.verify_otp("session-id", "000000") is False
+
+
 def test_phone_otp_verify_creates_member_session_and_authenticates_me(client, otp_provider):
     request_response = client.post("/api/v1/auth/otp/request", json={"phone": "+91 98765 43210"})
     challenge_id = request_response.json()["challenge_id"]
