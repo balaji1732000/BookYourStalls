@@ -18,14 +18,11 @@ def otp_provider():
             self.sent = []
             self.valid_codes = {}
 
-        def request_otp(self, phone: str) -> str:
+        def request_otp(self, email: str, otp: str) -> str:
             session_id = f"fake-session-{len(self.sent) + 1}"
-            self.sent.append({"phone": phone, "session_id": session_id})
-            self.valid_codes[session_id] = "123456"
+            self.sent.append({"email": email, "session_id": session_id})
+            self.valid_codes[session_id] = otp
             return session_id
-
-        def verify_otp(self, session_id: str, otp: str) -> bool:
-            return self.valid_codes.get(session_id) == otp
 
     provider = FakeOtpProvider()
     app.dependency_overrides[get_otp_provider] = lambda: provider

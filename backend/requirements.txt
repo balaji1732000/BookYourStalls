@@ -7,3 +7,4 @@ python-multipart>=0.0.20
 email-validator>=2.3.0
 pytest>=9.0.1
 httpx>=0.28.1
+resend>=2.30.1

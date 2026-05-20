@@ -19,6 +19,7 @@ class UserRead(BaseModel):
     id: int
     name: str
     email: EmailStr | None
+    email_verified_at: datetime | None = None
     phone: str | None
     phone_verified_at: datetime | None = None
     role: str
@@ -37,7 +38,7 @@ class TokenResponse(BaseModel):
 
 
 class OtpRequest(BaseModel):
-    phone: str = Field(min_length=10, max_length=20)
+    email: EmailStr
 
 
 class OtpRequestResponse(BaseModel):
@@ -48,7 +49,7 @@ class OtpRequestResponse(BaseModel):
 
 class OtpVerifyRequest(BaseModel):
     challenge_id: str = Field(min_length=8, max_length=80)
-    phone: str = Field(min_length=10, max_length=20)
+    email: EmailStr
     otp: str = Field(pattern="^[0-9]{4,8}$")
 
 

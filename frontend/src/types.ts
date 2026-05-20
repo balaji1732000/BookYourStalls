@@ -4,6 +4,7 @@ export interface User {
   id: number
   name: string
   email: string | null
+  email_verified_at?: string | null
   phone: string | null
   phone_verified_at?: string | null
   role: UserRole

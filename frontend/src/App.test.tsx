@@ -69,18 +69,20 @@ describe('Book Your Stall frontend', () => {
     window.history.pushState({}, '', '/')
   })
 
-  it('logs in with real SMS OTP flow and stores the returned session', async () => {
+  it('logs in with email OTP flow and stores the returned session', async () => {
     window.history.pushState({}, '', '/login')
     const fetchMock = vi.fn((url: string, options?: RequestInit) => {
       if (url.includes('/auth/otp/request') && options?.method === 'POST') {
+        expect(JSON.parse(String(options.body))).toEqual({ email: 'balaji@example.com' })
         return Promise.resolve(new Response(JSON.stringify({ challenge_id: 'challenge-1', expires_in_seconds: 300, resend_after_seconds: 45 }), { status: 200 }))
       }
       if (url.includes('/auth/otp/verify') && options?.method === 'POST') {
+        expect(JSON.parse(String(options.body))).toEqual({ challenge_id: 'challenge-1', email: 'balaji@example.com', otp: '123456' })
         return Promise.resolve(new Response(JSON.stringify({
           access_token: 'otp-token',
           token_type: 'bearer',
           is_new_user: true,
-          user: { id: 9, name: 'User 3210', email: null, phone: '919876543210', phone_verified_at: '2026-05-10T00:00:00', role: 'member', is_active: true, created_at: '2026-05-10T00:00:00' },
+          user: { id: 9, name: 'balaji', email: 'balaji@example.com', phone: null, email_verified_at: '2026-05-10T00:00:00', phone_verified_at: null, role: 'member', is_active: true, created_at: '2026-05-10T00:00:00' },
         }), { status: 200 }))
       }
       return Promise.resolve(new Response(JSON.stringify(eventsPayload), { status: 200 }))
@@ -88,11 +90,11 @@ describe('Book Your Stall frontend', () => {
     vi.stubGlobal('fetch', fetchMock)
 
     render(<App />)
-    await userEvent.type(screen.getByLabelText(/mobile number/i), '9876543210')
-    await userEvent.click(screen.getByRole('button', { name: /send otp/i }))
+    await userEvent.type(screen.getByLabelText(/email address/i), 'balaji@example.com')
+    await userEvent.click(screen.getByRole('button', { name: /send login code/i }))
 
-    expect(await screen.findByText(/otp sent/i)).toBeInTheDocument()
-    await userEvent.type(screen.getByLabelText(/enter otp/i), '123456')
+    expect(await screen.findByText(/login code sent/i)).toBeInTheDocument()
+    await userEvent.type(screen.getByLabelText(/enter login code/i), '123456')
     await userEvent.click(screen.getByRole('button', { name: /verify.*continue/i }))
 
     await waitFor(() => expect(localStorage.getItem('bys_token')).toBe('otp-token'))

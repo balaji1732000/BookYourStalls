@@ -8,6 +8,7 @@ from sqlalchemy import select
 
 from app.config import settings
 from app.deps import CurrentUser, DbSession
+from app.email_otp import OtpProvider, get_configured_otp_provider
 from app.models import OtpChallenge, User
 from app.schemas import (
     LoginRequest,
@@ -20,7 +21,6 @@ from app.schemas import (
     UserRead,
 )
 from app.security import create_access_token, hash_password, verify_password
-from app.sms import OtpProvider, get_configured_otp_provider
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -40,8 +40,16 @@ def normalize_phone(phone: str) -> str:
     return digits
 
 
+def normalize_email(email: str) -> str:
+    return email.strip().lower()
+
+
 def _token_for_user(user: User) -> str:
     return create_access_token(str(user.id), timedelta(minutes=settings.access_token_expire_minutes))
+
+
+def _generate_otp() -> str:
+    return f"{secrets.randbelow(1_000_000):06d}"
 
 
 @router.post("/register", response_model=UserRead, status_code=status.HTTP_201_CREATED)
@@ -72,17 +80,19 @@ def login(payload: LoginRequest, db: DbSession):
 
 
 @router.post("/otp/request", response_model=OtpRequestResponse)
-def request_phone_otp(
+def request_email_otp(
     payload: OtpRequest,
     db: DbSession,
     otp_provider: Annotated[OtpProvider, Depends(get_otp_provider)],
 ):
-    phone = normalize_phone(payload.phone)
-    provider_session_id = otp_provider.request_otp(phone)
+    email = normalize_email(str(payload.email))
+    otp = _generate_otp()
+    provider_session_id = otp_provider.request_otp(email, otp)
     challenge = OtpChallenge(
         id=secrets.token_urlsafe(24),
-        phone=phone,
+        email=email,
         provider_session_id=provider_session_id,
+        otp_hash=hash_password(otp),
         expires_at=datetime.now(timezone.utc) + timedelta(minutes=settings.otp_expire_minutes),
     )
     db.add(challenge)
@@ -95,15 +105,14 @@ def request_phone_otp(
 
 
 @router.post("/otp/verify", response_model=OtpTokenResponse)
-def verify_phone_otp(
+def verify_email_otp(
     payload: OtpVerifyRequest,
     db: DbSession,
-    otp_provider: Annotated[OtpProvider, Depends(get_otp_provider)],
 ):
-    phone = normalize_phone(payload.phone)
+    email = normalize_email(str(payload.email))
     challenge = db.get(OtpChallenge, payload.challenge_id)
     now = datetime.now(timezone.utc)
-    if not challenge or challenge.phone != phone:
+    if not challenge or challenge.email != email:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid OTP challenge")
     if challenge.consumed_at:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="OTP challenge already used")
@@ -116,24 +125,23 @@ def verify_phone_otp(
         raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail="Too many OTP attempts")
 
     challenge.attempt_count += 1
-    if not otp_provider.verify_otp(challenge.provider_session_id, payload.otp):
+    if not verify_password(payload.otp, challenge.otp_hash):
         db.commit()
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid OTP")
 
-    user = db.scalar(select(User).where(User.phone == phone))
+    user = db.scalar(select(User).where(User.email == email))
     is_new_user = user is None
     if user is None:
         user = User(
-            name=f"User {phone[-4:]}",
-            email=None,
-            phone=phone,
-            phone_verified_at=now,
+            name=email.split("@", 1)[0],
+            email=email,
+            email_verified_at=now,
             password_hash=None,
             role="member",
         )
         db.add(user)
     else:
-        user.phone_verified_at = user.phone_verified_at or now
+        user.email_verified_at = user.email_verified_at or now
     challenge.consumed_at = now
     db.commit()
     db.refresh(user)

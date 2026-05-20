@@ -749,7 +749,7 @@ function BookingForm({ eventId, stall, user, authLoading, onSuccess }: { eventId
 
 function LoginPage({ setUser }: { setUser: (user: User | null) => void }) {
   const navigate = useNavigate()
-  const [phone, setPhone] = useState('')
+  const [email, setEmail] = useState('')
   const [otp, setOtp] = useState('')
   const [challengeId, setChallengeId] = useState<string | null>(null)
   const [otpSent, setOtpSent] = useState(false)
@@ -761,11 +761,13 @@ function LoginPage({ setUser }: { setUser: (user: User | null) => void }) {
     setLoading(true)
     setError(null)
     try {
-      const response = await apiClient.requestOtp({ phone })
+      const normalizedEmail = email.trim().toLowerCase()
+      const response = await apiClient.requestOtp({ email: normalizedEmail })
+      setEmail(normalizedEmail)
       setChallengeId(response.challenge_id)
       setOtpSent(true)
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not send OTP')
+      setError(err instanceof Error ? err.message : 'Could not send login code')
     } finally {
       setLoading(false)
     }
@@ -777,11 +779,11 @@ function LoginPage({ setUser }: { setUser: (user: User | null) => void }) {
     setLoading(true)
     setError(null)
     try {
-      const response = await apiClient.verifyOtp({ challenge_id: challengeId, phone, otp })
+      const response = await apiClient.verifyOtp({ challenge_id: challengeId, email, otp })
       setUser(response.user)
       navigate('/')
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'OTP verification failed')
+      setError(err instanceof Error ? err.message : 'Login code verification failed')
     } finally {
       setLoading(false)
     }
@@ -789,24 +791,24 @@ function LoginPage({ setUser }: { setUser: (user: User | null) => void }) {
 
   return (
     <section className="auth-card otp-auth-card">
-      <p className="eyebrow">Phone login</p>
+      <p className="eyebrow">Email login</p>
       <h1>Login or create account</h1>
-      <p className="helper-text">We’ll send a real SMS OTP to your mobile number and keep your session active after verification.</p>
+      <p className="helper-text">We’ll send a secure login code to your email address and keep your session active after verification.</p>
       {error ? <p className="alert error">{error}</p> : null}
       {!otpSent ? (
         <form onSubmit={requestOtp} className="otp-auth-form">
-          <label>Mobile number<input inputMode="tel" autoComplete="tel" value={phone} onChange={(event) => setPhone(event.target.value)} placeholder="98765 43210" required minLength={10} /></label>
-          <button className="primary-button" type="submit" disabled={loading}>{loading ? 'Sending OTP…' : 'Send OTP'}</button>
+          <label>Email address<input type="email" autoComplete="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="you@example.com" required /></label>
+          <button className="primary-button" type="submit" disabled={loading}>{loading ? 'Sending code…' : 'Send login code'}</button>
         </form>
       ) : (
         <form onSubmit={verifyOtp} className="otp-auth-form">
-          <p className="success-note">OTP sent to {phone}</p>
-          <label>Enter OTP<input inputMode="numeric" autoComplete="one-time-code" value={otp} onChange={(event) => setOtp(event.target.value)} placeholder="6-digit code" required minLength={4} maxLength={8} /></label>
+          <p className="success-note">Login code sent to {email}</p>
+          <label>Enter login code<input inputMode="numeric" autoComplete="one-time-code" value={otp} onChange={(event) => setOtp(event.target.value)} placeholder="6-digit code" required minLength={4} maxLength={8} /></label>
           <button className="primary-button" type="submit" disabled={loading}>{loading ? 'Verifying…' : 'Verify & continue'}</button>
-          <button className="ghost-button" type="button" onClick={() => { setOtpSent(false); setOtp(''); setChallengeId(null) }}>Change number</button>
+          <button className="ghost-button" type="button" onClick={() => { setOtpSent(false); setOtp(''); setChallengeId(null) }}>Change email</button>
         </form>
       )}
-      <Link to="/register">Use email registration instead</Link>
+      <Link to="/register">Use password registration instead</Link>
     </section>
   )
 }

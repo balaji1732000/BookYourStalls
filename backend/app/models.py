@@ -53,6 +53,7 @@ class User(Base, TimestampMixin):
     id: Mapped[int] = mapped_column(primary_key=True)
     name: Mapped[str] = mapped_column(String(120))
     email: Mapped[str | None] = mapped_column(String(255), unique=True, index=True, nullable=True)
+    email_verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     phone: Mapped[str | None] = mapped_column(String(30), nullable=True, unique=True, index=True)
     phone_verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     password_hash: Mapped[str | None] = mapped_column(String(255), nullable=True)
@@ -70,8 +71,10 @@ class OtpChallenge(Base, TimestampMixin):
     __tablename__ = "otp_challenges"
 
     id: Mapped[str] = mapped_column(String(64), primary_key=True)
-    phone: Mapped[str] = mapped_column(String(30), index=True)
+    email: Mapped[str] = mapped_column(String(255), index=True)
+    phone: Mapped[str | None] = mapped_column(String(30), nullable=True, index=True)
     provider_session_id: Mapped[str] = mapped_column(String(255), index=True)
+    otp_hash: Mapped[str] = mapped_column(String(255))
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
     consumed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     attempt_count: Mapped[int] = mapped_column(Integer, default=0)
