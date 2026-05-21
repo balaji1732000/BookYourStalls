@@ -16,6 +16,7 @@ from app.schemas import (
     OtpRequestResponse,
     OtpTokenResponse,
     OtpVerifyRequest,
+    ProfileCompleteRequest,
     TokenResponse,
     UserCreate,
     UserRead,
@@ -50,6 +51,10 @@ def _token_for_user(user: User) -> str:
 
 def _generate_otp() -> str:
     return f"{secrets.randbelow(1_000_000):06d}"
+
+
+def _requires_profile_completion(user: User) -> bool:
+    return not bool(user.profile_completed_at and user.name and user.phone and user.city and user.onboarding_intent)
 
 
 @router.post("/register", response_model=UserRead, status_code=status.HTTP_201_CREATED)
@@ -145,9 +150,28 @@ def verify_email_otp(
     challenge.consumed_at = now
     db.commit()
     db.refresh(user)
-    return OtpTokenResponse(access_token=_token_for_user(user), user=user, is_new_user=is_new_user)
+    return OtpTokenResponse(
+        access_token=_token_for_user(user),
+        user=user,
+        is_new_user=is_new_user,
+        requires_profile_completion=_requires_profile_completion(user),
+    )
 
 
 @router.get("/me", response_model=UserRead)
 def me(current_user: CurrentUser):
+    return current_user
+
+
+@router.put("/me/profile", response_model=UserRead)
+def complete_profile(payload: ProfileCompleteRequest, current_user: CurrentUser, db: DbSession):
+    current_user.name = payload.name.strip()
+    current_user.phone = normalize_phone(payload.phone)
+    current_user.city = payload.city.strip()
+    current_user.onboarding_intent = payload.onboarding_intent
+    current_user.business_name = payload.business_name.strip() if payload.business_name else None
+    current_user.business_category = payload.business_category.strip() if payload.business_category else None
+    current_user.profile_completed_at = datetime.now(timezone.utc)
+    db.commit()
+    db.refresh(current_user)
     return current_user

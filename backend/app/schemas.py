@@ -22,6 +22,11 @@ class UserRead(BaseModel):
     email_verified_at: datetime | None = None
     phone: str | None
     phone_verified_at: datetime | None = None
+    city: str | None = None
+    onboarding_intent: str | None = None
+    business_name: str | None = None
+    business_category: str | None = None
+    profile_completed_at: datetime | None = None
     role: str
     is_active: bool
     created_at: datetime
@@ -56,6 +61,16 @@ class OtpVerifyRequest(BaseModel):
 class OtpTokenResponse(TokenResponse):
     user: UserRead
     is_new_user: bool
+    requires_profile_completion: bool
+
+
+class ProfileCompleteRequest(BaseModel):
+    name: str = Field(min_length=2, max_length=120)
+    phone: str = Field(min_length=5, max_length=30)
+    city: str = Field(min_length=2, max_length=100)
+    onboarding_intent: str = Field(pattern="^(book_stalls|create_events|explore_events|both)$")
+    business_name: str | None = Field(default=None, max_length=200)
+    business_category: str | None = Field(default=None, max_length=120)
 
 
 class OrganizerProfileUpsert(BaseModel):

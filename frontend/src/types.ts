@@ -7,6 +7,11 @@ export interface User {
   email_verified_at?: string | null
   phone: string | null
   phone_verified_at?: string | null
+  city?: string | null
+  onboarding_intent?: string | null
+  business_name?: string | null
+  business_category?: string | null
+  profile_completed_at?: string | null
   role: UserRole
   is_active: boolean
   created_at: string

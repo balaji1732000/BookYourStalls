@@ -40,6 +40,11 @@ def _sqlite_rebuild_users_for_email_otp(connection) -> None:
             phone_verified_at DATETIME,
             password_hash VARCHAR(255),
             role VARCHAR(30) NOT NULL,
+            city VARCHAR(100),
+            onboarding_intent VARCHAR(40),
+            business_name VARCHAR(200),
+            business_category VARCHAR(120),
+            profile_completed_at DATETIME,
             is_active BOOLEAN NOT NULL,
             created_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL,
             updated_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL
@@ -48,14 +53,21 @@ def _sqlite_rebuild_users_for_email_otp(connection) -> None:
     connection.execute(text("""
         INSERT INTO users_new (
             id, name, email, email_verified_at, phone, phone_verified_at, password_hash,
-            role, is_active, created_at, updated_at
+            role, city, onboarding_intent, business_name, business_category,
+            profile_completed_at, is_active, created_at, updated_at
         )
         SELECT
             id, name, email,
             CASE WHEN EXISTS(SELECT 1 FROM pragma_table_info('users') WHERE name='email_verified_at') THEN email_verified_at ELSE NULL END,
             phone,
             CASE WHEN EXISTS(SELECT 1 FROM pragma_table_info('users') WHERE name='phone_verified_at') THEN phone_verified_at ELSE NULL END,
-            password_hash, role, is_active, created_at, updated_at
+            password_hash, role,
+            CASE WHEN EXISTS(SELECT 1 FROM pragma_table_info('users') WHERE name='city') THEN city ELSE NULL END,
+            CASE WHEN EXISTS(SELECT 1 FROM pragma_table_info('users') WHERE name='onboarding_intent') THEN onboarding_intent ELSE NULL END,
+            CASE WHEN EXISTS(SELECT 1 FROM pragma_table_info('users') WHERE name='business_name') THEN business_name ELSE NULL END,
+            CASE WHEN EXISTS(SELECT 1 FROM pragma_table_info('users') WHERE name='business_category') THEN business_category ELSE NULL END,
+            CASE WHEN EXISTS(SELECT 1 FROM pragma_table_info('users') WHERE name='profile_completed_at') THEN profile_completed_at ELSE NULL END,
+            is_active, created_at, updated_at
         FROM users
     """))
     connection.execute(text("DROP TABLE users"))
@@ -126,6 +138,16 @@ def apply_sqlite_dev_migrations(db_engine: Engine) -> None:
             connection.execute(text("ALTER TABLE users ADD COLUMN phone_verified_at DATETIME"))
         if user_columns and "email_verified_at" not in user_columns:
             connection.execute(text("ALTER TABLE users ADD COLUMN email_verified_at DATETIME"))
+        if user_columns and "city" not in user_columns:
+            connection.execute(text("ALTER TABLE users ADD COLUMN city VARCHAR(100)"))
+        if user_columns and "onboarding_intent" not in user_columns:
+            connection.execute(text("ALTER TABLE users ADD COLUMN onboarding_intent VARCHAR(40)"))
+        if user_columns and "business_name" not in user_columns:
+            connection.execute(text("ALTER TABLE users ADD COLUMN business_name VARCHAR(200)"))
+        if user_columns and "business_category" not in user_columns:
+            connection.execute(text("ALTER TABLE users ADD COLUMN business_category VARCHAR(120)"))
+        if user_columns and "profile_completed_at" not in user_columns:
+            connection.execute(text("ALTER TABLE users ADD COLUMN profile_completed_at DATETIME"))
         if user_columns and (
             _sqlite_column_nullable(db_engine, "users", "email") is False
             or _sqlite_column_nullable(db_engine, "users", "password_hash") is False

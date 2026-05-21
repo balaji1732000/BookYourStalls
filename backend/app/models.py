@@ -58,6 +58,11 @@ class User(Base, TimestampMixin):
     phone_verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     password_hash: Mapped[str | None] = mapped_column(String(255), nullable=True)
     role: Mapped[str] = mapped_column(String(30), index=True)
+    city: Mapped[str | None] = mapped_column(String(100), nullable=True, index=True)
+    onboarding_intent: Mapped[str | None] = mapped_column(String(40), nullable=True, index=True)
+    business_name: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    business_category: Mapped[str | None] = mapped_column(String(120), nullable=True, index=True)
+    profile_completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     is_active: Mapped[bool] = mapped_column(default=True)
 
     events: Mapped[list["Event"]] = relationship(back_populates="organizer")

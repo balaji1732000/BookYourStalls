@@ -81,8 +81,9 @@ describe('Book Your Stall frontend', () => {
         return Promise.resolve(new Response(JSON.stringify({
           access_token: 'otp-token',
           token_type: 'bearer',
-          is_new_user: true,
-          user: { id: 9, name: 'balaji', email: 'balaji@example.com', phone: null, email_verified_at: '2026-05-10T00:00:00', phone_verified_at: null, role: 'member', is_active: true, created_at: '2026-05-10T00:00:00' },
+          is_new_user: false,
+          requires_profile_completion: false,
+          user: { id: 9, name: 'Balaji', email: 'balaji@example.com', phone: '919876543210', email_verified_at: '2026-05-10T00:00:00', phone_verified_at: null, city: 'Chennai', onboarding_intent: 'book_stalls', business_name: 'Yuneekway', business_category: 'Fashion & apparel', profile_completed_at: '2026-05-10T00:00:00', role: 'member', is_active: true, created_at: '2026-05-10T00:00:00' },
         }), { status: 200 }))
       }
       return Promise.resolve(new Response(JSON.stringify(eventsPayload), { status: 200 }))
@@ -102,6 +103,74 @@ describe('Book Your Stall frontend', () => {
     expect(fetchMock.mock.calls.some(([url]) => String(url).includes('/auth/otp/verify'))).toBe(true)
   })
 
+  it('routes first-time email OTP users to complete a minimal profile before entering the app', async () => {
+    window.history.pushState({}, '', '/login')
+    const fetchMock = vi.fn((url: string, options?: RequestInit) => {
+      if (url.includes('/auth/otp/request') && options?.method === 'POST') {
+        return Promise.resolve(new Response(JSON.stringify({ challenge_id: 'challenge-2', expires_in_seconds: 300, resend_after_seconds: 45 }), { status: 200 }))
+      }
+      if (url.includes('/auth/otp/verify') && options?.method === 'POST') {
+        return Promise.resolve(new Response(JSON.stringify({
+          access_token: 'new-user-token',
+          token_type: 'bearer',
+          is_new_user: true,
+          requires_profile_completion: true,
+          user: { id: 10, name: 'newmember', email: 'newmember@example.com', phone: null, email_verified_at: '2026-05-10T00:00:00', phone_verified_at: null, city: null, onboarding_intent: null, business_name: null, business_category: null, profile_completed_at: null, role: 'member', is_active: true, created_at: '2026-05-10T00:00:00' },
+        }), { status: 200 }))
+      }
+      if (url.includes('/auth/me/profile') && options?.method === 'PUT') {
+        expect(options?.headers).toMatchObject({ Authorization: 'Bearer new-user-token' })
+        expect(JSON.parse(String(options.body))).toEqual({
+          name: 'Balaji',
+          phone: '6383954887',
+          city: 'Chennai',
+          onboarding_intent: 'book_stalls',
+          business_name: 'Yuneekway',
+          business_category: 'Fashion & apparel',
+        })
+        return Promise.resolve(new Response(JSON.stringify({ id: 10, name: 'Balaji', email: 'newmember@example.com', phone: '6383954887', email_verified_at: '2026-05-10T00:00:00', phone_verified_at: null, city: 'Chennai', onboarding_intent: 'book_stalls', business_name: 'Yuneekway', business_category: 'Fashion & apparel', profile_completed_at: '2026-05-10T00:05:00', role: 'member', is_active: true, created_at: '2026-05-10T00:00:00' }), { status: 200 }))
+      }
+      return Promise.resolve(new Response(JSON.stringify(eventsPayload), { status: 200 }))
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(<App />)
+    await userEvent.type(screen.getByLabelText(/email address/i), 'newmember@example.com')
+    await userEvent.click(screen.getByRole('button', { name: /send login code/i }))
+    await userEvent.type(await screen.findByLabelText(/enter login code/i), '123456')
+    await userEvent.click(screen.getByRole('button', { name: /verify.*continue/i }))
+
+    expect(await screen.findByRole('heading', { name: /complete your profile/i })).toBeInTheDocument()
+    expect(screen.getByText(/just a few details so organisers and vendors can connect with you/i)).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: /book your perfect stall/i })).not.toBeInTheDocument()
+
+    await userEvent.clear(screen.getByLabelText(/full name/i))
+    await userEvent.type(screen.getByLabelText(/full name/i), 'Balaji')
+    await userEvent.type(screen.getByLabelText(/whatsapp number/i), '6383954887')
+    await userEvent.selectOptions(screen.getByLabelText(/^city/i), 'Chennai')
+    await userEvent.click(screen.getByRole('radio', { name: /book stalls/i }))
+    await userEvent.type(screen.getByLabelText(/business\/display name/i), 'Yuneekway')
+    await userEvent.type(screen.getByLabelText(/business category/i), 'Fashion & apparel')
+    await userEvent.click(screen.getByRole('button', { name: /continue/i }))
+
+    expect(await screen.findByRole('heading', { name: /book your perfect stall/i })).toBeInTheDocument()
+    expect(localStorage.getItem('bys_token')).toBe('new-user-token')
+  })
+
+  it('restores incomplete sessions to profile completion instead of the marketplace', async () => {
+    localStorage.setItem('bys_token', 'incomplete-token')
+    const fetchMock = vi.fn((url: string) => {
+      if (url.includes('/auth/me')) return Promise.resolve(new Response(JSON.stringify({ id: 11, name: 'incomplete', email: 'incomplete@example.com', phone: null, email_verified_at: '2026-05-10T00:00:00', phone_verified_at: null, city: null, onboarding_intent: null, business_name: null, business_category: null, profile_completed_at: null, role: 'member', is_active: true, created_at: '2026-05-10T00:00:00' }), { status: 200 }))
+      return Promise.resolve(new Response(JSON.stringify(eventsPayload), { status: 200 }))
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(<App />)
+
+    expect(await screen.findByRole('heading', { name: /complete your profile/i })).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: /book your perfect stall/i })).not.toBeInTheDocument()
+  })
+
   it('shows event listing with filters and event cards', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify(eventsPayload), { status: 200 })))
 
@@ -116,7 +185,7 @@ describe('Book Your Stall frontend', () => {
   it('opens event detail and submits a booking request as logged-in vendor', async () => {
     localStorage.setItem('bys_token', 'token-1')
     const fetchMock = vi.fn((url: string, options?: RequestInit) => {
-      if (url.includes('/auth/me')) return Promise.resolve(new Response(JSON.stringify({ id: 2, name: 'Balaji', email: 'b@example.com', phone: '9999999999', role: 'vendor', is_active: true, created_at: '2026-05-10T00:00:00' }), { status: 200 }))
+      if (url.includes('/auth/me')) return Promise.resolve(new Response(JSON.stringify({ id: 2, name: 'Balaji', email: 'b@example.com', phone: '9999999999', city: 'Chennai', onboarding_intent: 'book_stalls', business_name: null, business_category: null, profile_completed_at: '2026-05-10T00:00:00', role: 'vendor', is_active: true, created_at: '2026-05-10T00:00:00' }), { status: 200 }))
       if (url.includes('/events/10/detail')) return Promise.resolve(new Response(JSON.stringify(detailPayload), { status: 200 }))
       if (url.includes('/events')) return Promise.resolve(new Response(JSON.stringify(eventsPayload), { status: 200 }))
       if (url.includes('/bookings') && options?.method === 'POST') return Promise.resolve(new Response(JSON.stringify({ id: 99, event_id: 10, stall_id: 7, vendor_id: 2, booking_reference: 'BYS-ABC', status: 'pending', business_name: 'Yuneekway', contact_name: 'Balaji', contact_phone: '9999999999', notes: 'Vintage clothing stall', total_amount: 25000, created_at: '2026-05-10T00:00:00', updated_at: '2026-05-10T00:00:00' }), { status: 201 }))
@@ -225,7 +294,7 @@ describe('Book Your Stall frontend', () => {
     expect(fetchMock.mock.calls.every(([url]) => !String(url).includes('/events/mine'))).toBe(true)
   })
 
-  it('opens the menu page with login and register links from bottom navigation', async () => {
+  it('opens the production menu without exposing test login credentials', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify(eventsPayload), { status: 200 })))
 
     render(<App />)
@@ -234,9 +303,10 @@ describe('Book Your Stall frontend', () => {
     const menuCard = screen.getByRole('heading', { name: /menu/i }).closest('section') as HTMLElement
     expect(within(menuCard).getByRole('link', { name: /login/i })).toHaveAttribute('href', '/login')
     expect(within(menuCard).getByRole('link', { name: /create account/i })).toHaveAttribute('href', '/register')
-    expect(within(menuCard).getByText(/testvendor@example.com/i)).toBeInTheDocument()
-    expect(within(menuCard).getByText(/testorganizer@example.com/i)).toBeInTheDocument()
-    expect(within(menuCard).getByText(/TestPass123!/i)).toBeInTheDocument()
+    expect(within(menuCard).queryByText(/test login/i)).not.toBeInTheDocument()
+    expect(within(menuCard).queryByText(/testvendor@example.com/i)).not.toBeInTheDocument()
+    expect(within(menuCard).queryByText(/testorganizer@example.com/i)).not.toBeInTheDocument()
+    expect(within(menuCard).queryByText(/TestPass123!/i)).not.toBeInTheDocument()
   })
 
   it('opens notifications from the bell button', async () => {
@@ -254,7 +324,7 @@ describe('Book Your Stall frontend', () => {
     const createdEvent = { ...eventsPayload.items[0], id: 44, title: 'Creator Expo', venue_name: 'Creator Hall', start_date: '2026-12-01', end_date: '2026-12-02', status: 'draft' }
     const publishedEvent = { ...createdEvent, status: 'published' }
     const fetchMock = vi.fn((url: string, options?: RequestInit) => {
-      if (url.includes('/auth/me')) return Promise.resolve(new Response(JSON.stringify({ id: 3, name: 'Test Organizer', email: 'testorganizer@example.com', phone: '9000001002', role: 'organizer', is_active: true, created_at: '2026-05-10T00:00:00' }), { status: 200 }))
+      if (url.includes('/auth/me')) return Promise.resolve(new Response(JSON.stringify({ id: 3, name: 'Test Organizer', email: 'testorganizer@example.com', phone: '9000001002', city: 'Chennai', onboarding_intent: 'book_stalls', business_name: null, business_category: null, profile_completed_at: '2026-05-10T00:00:00', role: 'organizer', is_active: true, created_at: '2026-05-10T00:00:00' }), { status: 200 }))
       if (url.endsWith('/events') && options?.method === 'POST') return Promise.resolve(new Response(JSON.stringify(createdEvent), { status: 201 }))
       if (url.endsWith('/events/44/publish') && options?.method === 'POST') return Promise.resolve(new Response(JSON.stringify(publishedEvent), { status: 200 }))
       if (url.endsWith('/events')) return Promise.resolve(new Response(JSON.stringify({ total: 2, items: [eventsPayload.items[0], publishedEvent] }), { status: 200 }))
@@ -299,7 +369,7 @@ describe('Book Your Stall frontend', () => {
     localStorage.setItem('bys_token', 'token-1')
     let resolveBooking: (response: Response) => void = () => undefined
     const fetchMock = vi.fn((url: string, options?: RequestInit) => {
-      if (url.includes('/auth/me')) return Promise.resolve(new Response(JSON.stringify({ id: 2, name: 'Balaji', email: 'b@example.com', phone: '9999999999', role: 'vendor', is_active: true, created_at: '2026-05-10T00:00:00' }), { status: 200 }))
+      if (url.includes('/auth/me')) return Promise.resolve(new Response(JSON.stringify({ id: 2, name: 'Balaji', email: 'b@example.com', phone: '9999999999', city: 'Chennai', onboarding_intent: 'book_stalls', business_name: null, business_category: null, profile_completed_at: '2026-05-10T00:00:00', role: 'vendor', is_active: true, created_at: '2026-05-10T00:00:00' }), { status: 200 }))
       if (url.includes('/events/10/detail')) return Promise.resolve(new Response(JSON.stringify(detailPayload), { status: 200 }))
       if (url.includes('/events')) return Promise.resolve(new Response(JSON.stringify(eventsPayload), { status: 200 }))
       if (url.includes('/bookings') && options?.method === 'POST') {
@@ -348,7 +418,7 @@ describe('Book Your Stall frontend', () => {
     expect(screen.getByRole('button', { name: /checking authentication/i })).toBeDisabled()
     expect(screen.queryByText(/please login as vendor/i)).not.toBeInTheDocument()
 
-    resolveMe(new Response(JSON.stringify({ id: 2, name: 'Balaji', email: 'b@example.com', phone: '9999999999', role: 'vendor', is_active: true, created_at: '2026-05-10T00:00:00' }), { status: 200 }))
+    resolveMe(new Response(JSON.stringify({ id: 2, name: 'Balaji', email: 'b@example.com', phone: '9999999999', city: 'Chennai', onboarding_intent: 'book_stalls', business_name: null, business_category: null, profile_completed_at: '2026-05-10T00:00:00', role: 'vendor', is_active: true, created_at: '2026-05-10T00:00:00' }), { status: 200 }))
     expect(await screen.findByRole('button', { name: /submit booking request/i })).toBeInTheDocument()
   })
 
@@ -375,7 +445,7 @@ describe('Book Your Stall frontend', () => {
     localStorage.setItem('bys_token', 'organizer-token')
     const generatedStalls = groupedDetailPayload.stalls.slice(0, 3).map((stall) => ({ ...stall, status: 'available' }))
     const fetchMock = vi.fn((url: string, options?: RequestInit) => {
-      if (url.includes('/auth/me')) return Promise.resolve(new Response(JSON.stringify({ id: 3, name: 'Test Organizer', email: 'testorganizer@example.com', phone: '9000001002', role: 'organizer', is_active: true, created_at: '2026-05-10T00:00:00' }), { status: 200 }))
+      if (url.includes('/auth/me')) return Promise.resolve(new Response(JSON.stringify({ id: 3, name: 'Test Organizer', email: 'testorganizer@example.com', phone: '9000001002', city: 'Chennai', onboarding_intent: 'book_stalls', business_name: null, business_category: null, profile_completed_at: '2026-05-10T00:00:00', role: 'organizer', is_active: true, created_at: '2026-05-10T00:00:00' }), { status: 200 }))
       if (url.includes('/events/10/detail')) return Promise.resolve(new Response(JSON.stringify({ ...groupedDetailPayload, stalls: [] }), { status: 200 }))
       if (url.endsWith('/events/10/stall-packages') && options?.method === 'POST') return Promise.resolve(new Response(JSON.stringify(generatedStalls), { status: 201 }))
       if (url.includes('/events')) return Promise.resolve(new Response(JSON.stringify(eventsPayload), { status: 200 }))
@@ -404,7 +474,7 @@ describe('Book Your Stall frontend', () => {
   it('allows organizer owner to submit a customer booking without vendor-login error', async () => {
     localStorage.setItem('bys_token', 'organizer-token')
     const fetchMock = vi.fn((url: string, options?: RequestInit) => {
-      if (url.includes('/auth/me')) return Promise.resolve(new Response(JSON.stringify({ id: 3, name: 'Test Organizer', email: 'testorganizer@example.com', phone: '9000001002', role: 'organizer', is_active: true, created_at: '2026-05-10T00:00:00' }), { status: 200 }))
+      if (url.includes('/auth/me')) return Promise.resolve(new Response(JSON.stringify({ id: 3, name: 'Test Organizer', email: 'testorganizer@example.com', phone: '9000001002', city: 'Chennai', onboarding_intent: 'book_stalls', business_name: null, business_category: null, profile_completed_at: '2026-05-10T00:00:00', role: 'organizer', is_active: true, created_at: '2026-05-10T00:00:00' }), { status: 200 }))
       if (url.includes('/events/10/detail')) return Promise.resolve(new Response(JSON.stringify(groupedDetailPayload), { status: 200 }))
       if (url.includes('/bookings') && options?.method === 'POST') return Promise.resolve(new Response(JSON.stringify({ id: 101, event_id: 10, stall_id: 21, vendor_id: 3, booking_reference: 'BYS-ORG', status: 'pending', business_name: 'Yuneekway', contact_name: 'Balaji', contact_phone: '6383954887', notes: 'Vintage thrifted clothes', total_amount: 8000, created_at: '2026-05-10T00:00:00', updated_at: '2026-05-10T00:00:00' }), { status: 201 }))
       if (url.includes('/events')) return Promise.resolve(new Response(JSON.stringify(eventsPayload), { status: 200 }))
@@ -427,7 +497,7 @@ describe('Book Your Stall frontend', () => {
   it('closes the booking form when the user logs out', async () => {
     localStorage.setItem('bys_token', 'token-1')
     const fetchMock = vi.fn((url: string) => {
-      if (url.includes('/auth/me')) return Promise.resolve(new Response(JSON.stringify({ id: 2, name: 'Balaji', email: 'b@example.com', phone: '9999999999', role: 'vendor', is_active: true, created_at: '2026-05-10T00:00:00' }), { status: 200 }))
+      if (url.includes('/auth/me')) return Promise.resolve(new Response(JSON.stringify({ id: 2, name: 'Balaji', email: 'b@example.com', phone: '9999999999', city: 'Chennai', onboarding_intent: 'book_stalls', business_name: null, business_category: null, profile_completed_at: '2026-05-10T00:00:00', role: 'vendor', is_active: true, created_at: '2026-05-10T00:00:00' }), { status: 200 }))
       if (url.includes('/events/10/detail')) return Promise.resolve(new Response(JSON.stringify(detailPayload), { status: 200 }))
       if (url.includes('/events')) return Promise.resolve(new Response(JSON.stringify(eventsPayload), { status: 200 }))
       return Promise.resolve(new Response('{}', { status: 404 }))
@@ -446,9 +516,9 @@ describe('Book Your Stall frontend', () => {
 
   it('registers a member account without exposing role selection or sending role payload', async () => {
     const fetchMock = vi.fn((url: string, options?: RequestInit) => {
-      if (url.includes('/auth/register') && options?.method === 'POST') return Promise.resolve(new Response(JSON.stringify({ id: 9, name: 'Balaji', email: 'balaji@example.com', phone: '6383954887', role: 'member', is_active: true, created_at: '2026-05-10T00:00:00' }), { status: 201 }))
+      if (url.includes('/auth/register') && options?.method === 'POST') return Promise.resolve(new Response(JSON.stringify({ id: 9, name: 'Balaji', email: 'balaji@example.com', phone: '6383954887', city: 'Chennai', onboarding_intent: 'book_stalls', business_name: null, business_category: null, profile_completed_at: '2026-05-10T00:00:00', role: 'member', is_active: true, created_at: '2026-05-10T00:00:00' }), { status: 201 }))
       if (url.includes('/auth/login') && options?.method === 'POST') return Promise.resolve(new Response(JSON.stringify({ access_token: 'member-token', token_type: 'bearer' }), { status: 200 }))
-      if (url.includes('/auth/me')) return Promise.resolve(new Response(JSON.stringify({ id: 9, name: 'Balaji', email: 'balaji@example.com', phone: '6383954887', role: 'member', is_active: true, created_at: '2026-05-10T00:00:00' }), { status: 200 }))
+      if (url.includes('/auth/me')) return Promise.resolve(new Response(JSON.stringify({ id: 9, name: 'Balaji', email: 'balaji@example.com', phone: '6383954887', city: 'Chennai', onboarding_intent: 'book_stalls', business_name: null, business_category: null, profile_completed_at: '2026-05-10T00:00:00', role: 'member', is_active: true, created_at: '2026-05-10T00:00:00' }), { status: 200 }))
       if (url.includes('/events')) return Promise.resolve(new Response(JSON.stringify(eventsPayload), { status: 200 }))
       return Promise.resolve(new Response('{}', { status: 404 }))
     })
@@ -475,7 +545,7 @@ describe('Book Your Stall frontend', () => {
     const createdEvent = { ...eventsPayload.items[0], id: 44, title: 'Creator Expo', venue_name: 'Creator Hall', start_date: '2026-12-01', end_date: '2026-12-02', status: 'draft', categories: ['Shopping expo', 'Vintage sneaker meetup'], allowed_vendor_categories: [] }
     const publishedEvent = { ...createdEvent, status: 'published' }
     const fetchMock = vi.fn((url: string, options?: RequestInit) => {
-      if (url.includes('/auth/me')) return Promise.resolve(new Response(JSON.stringify({ id: 3, name: 'Balaji', email: 'balaji@example.com', phone: '9000001002', role: 'member', is_active: true, created_at: '2026-05-10T00:00:00' }), { status: 200 }))
+      if (url.includes('/auth/me')) return Promise.resolve(new Response(JSON.stringify({ id: 3, name: 'Balaji', email: 'balaji@example.com', phone: '9000001002', city: 'Chennai', onboarding_intent: 'book_stalls', business_name: null, business_category: null, profile_completed_at: '2026-05-10T00:00:00', role: 'member', is_active: true, created_at: '2026-05-10T00:00:00' }), { status: 200 }))
       if (url.endsWith('/events') && options?.method === 'POST') return Promise.resolve(new Response(JSON.stringify(createdEvent), { status: 201 }))
       if (url.endsWith('/events/44/publish') && options?.method === 'POST') return Promise.resolve(new Response(JSON.stringify(publishedEvent), { status: 200 }))
       if (url.endsWith('/events')) return Promise.resolve(new Response(JSON.stringify({ total: 2, items: [eventsPayload.items[0], publishedEvent] }), { status: 200 }))
@@ -513,7 +583,7 @@ describe('Book Your Stall frontend', () => {
   it('presents create event as mobile-friendly sections with category chips', async () => {
     localStorage.setItem('bys_token', 'member-token')
     vi.stubGlobal('fetch', vi.fn((url: string) => {
-      if (url.includes('/auth/me')) return Promise.resolve(new Response(JSON.stringify({ id: 3, name: 'Balaji', email: 'balaji@example.com', phone: '9000001002', role: 'member', is_active: true, created_at: '2026-05-10T00:00:00' }), { status: 200 }))
+      if (url.includes('/auth/me')) return Promise.resolve(new Response(JSON.stringify({ id: 3, name: 'Balaji', email: 'balaji@example.com', phone: '9000001002', city: 'Chennai', onboarding_intent: 'book_stalls', business_name: null, business_category: null, profile_completed_at: '2026-05-10T00:00:00', role: 'member', is_active: true, created_at: '2026-05-10T00:00:00' }), { status: 200 }))
       return Promise.resolve(new Response(JSON.stringify(eventsPayload), { status: 200 }))
     }))
 
@@ -530,7 +600,7 @@ describe('Book Your Stall frontend', () => {
   it('shows a vendor-friendly booking panel with package summary before request fields', async () => {
     localStorage.setItem('bys_token', 'member-token')
     vi.stubGlobal('fetch', vi.fn((url: string) => {
-      if (url.includes('/auth/me')) return Promise.resolve(new Response(JSON.stringify({ id: 2, name: 'Balaji', email: 'b@example.com', phone: '9999999999', role: 'member', is_active: true, created_at: '2026-05-10T00:00:00' }), { status: 200 }))
+      if (url.includes('/auth/me')) return Promise.resolve(new Response(JSON.stringify({ id: 2, name: 'Balaji', email: 'b@example.com', phone: '9999999999', city: 'Chennai', onboarding_intent: 'book_stalls', business_name: null, business_category: null, profile_completed_at: '2026-05-10T00:00:00', role: 'member', is_active: true, created_at: '2026-05-10T00:00:00' }), { status: 200 }))
       if (url.includes('/events/10/detail')) return Promise.resolve(new Response(JSON.stringify(detailPayload), { status: 200 }))
       return Promise.resolve(new Response(JSON.stringify(eventsPayload), { status: 200 }))
     }))
@@ -549,7 +619,7 @@ describe('Book Your Stall frontend', () => {
     localStorage.setItem('bys_token', 'member-token')
     const myEventsPayload = { total: 1, items: [{ ...eventsPayload.items[0], organizer_id: 2, title: 'My Conducted Expo' }] }
     const fetchMock = vi.fn((url: string, options?: RequestInit) => {
-      if (url.includes('/auth/me')) return Promise.resolve(new Response(JSON.stringify({ id: 2, name: 'Balaji', email: 'b@example.com', phone: '9999999999', role: 'member', is_active: true, created_at: '2026-05-10T00:00:00' }), { status: 200 }))
+      if (url.includes('/auth/me')) return Promise.resolve(new Response(JSON.stringify({ id: 2, name: 'Balaji', email: 'b@example.com', phone: '9999999999', city: 'Chennai', onboarding_intent: 'book_stalls', business_name: null, business_category: null, profile_completed_at: '2026-05-10T00:00:00', role: 'member', is_active: true, created_at: '2026-05-10T00:00:00' }), { status: 200 }))
       if (url.includes('/events/10/detail')) return Promise.resolve(new Response(JSON.stringify(detailPayload), { status: 200 }))
       if (url.includes('/events/mine')) return Promise.resolve(new Response(JSON.stringify(myEventsPayload), { status: 200 }))
       if (url.includes('/bookings') && options?.method === 'POST') return Promise.resolve(new Response(JSON.stringify({ id: 99, event_id: 10, stall_id: 7, vendor_id: 2, booking_reference: 'BYS-TICK', status: 'pending', business_name: 'Yuneekway', contact_name: 'Balaji', contact_phone: '9999999999', notes: 'Vintage clothing stall', total_amount: 25000, created_at: '2026-05-10T00:00:00', updated_at: '2026-05-10T00:00:00' }), { status: 201 }))
@@ -577,7 +647,7 @@ describe('Book Your Stall frontend', () => {
     localStorage.setItem('bys_token', 'member-token')
     const myEventsPayload = { total: 0, items: [] }
     const fetchMock = vi.fn((url: string, options?: RequestInit) => {
-      if (url.includes('/auth/me')) return Promise.resolve(new Response(JSON.stringify({ id: 2, name: 'Balaji', email: 'b@example.com', phone: '9999999999', role: 'member', is_active: true, created_at: '2026-05-10T00:00:00' }), { status: 200 }))
+      if (url.includes('/auth/me')) return Promise.resolve(new Response(JSON.stringify({ id: 2, name: 'Balaji', email: 'b@example.com', phone: '9999999999', city: 'Chennai', onboarding_intent: 'book_stalls', business_name: null, business_category: null, profile_completed_at: '2026-05-10T00:00:00', role: 'member', is_active: true, created_at: '2026-05-10T00:00:00' }), { status: 200 }))
       if (url.includes('/events/10/detail')) return Promise.resolve(new Response(JSON.stringify(detailPayload), { status: 200 }))
       if (url.includes('/events/mine')) return Promise.resolve(new Response(JSON.stringify(myEventsPayload), { status: 200 }))
       if (url.includes('/bookings') && options?.method === 'POST') return Promise.resolve(new Response(JSON.stringify({ id: 99, event_id: 10, stall_id: 7, vendor_id: 2, booking_reference: 'BYS-CONNECT', status: 'pending', business_name: 'Yuneekway', contact_name: 'Balaji', contact_phone: '9999999999', organizer_contact_name: 'Organizer One', organizer_contact_phone: '9000001001', vendor_contact_name: 'Balaji', vendor_contact_phone: '9999999999', notes: 'Vintage clothing stall', total_amount: 25000, created_at: '2026-05-10T00:00:00', updated_at: '2026-05-10T00:00:00' }), { status: 201 }))
@@ -605,7 +675,7 @@ describe('Book Your Stall frontend', () => {
     const myEventsPayload = { total: 1, items: [{ ...eventsPayload.items[0], organizer_id: 3, title: 'My Conducted Expo' }] }
     const bookingPayload = [{ id: 99, event_id: 10, stall_id: 7, vendor_id: 2, booking_reference: 'BYS-CONNECT', status: 'pending', business_name: 'Yuneekway', contact_name: 'Balaji', contact_phone: '9999999999', organizer_contact_name: 'Test Organizer', organizer_contact_phone: '9000001001', vendor_contact_name: 'Balaji', vendor_contact_phone: '9999999999', notes: 'Vintage clothing stall', total_amount: 25000, created_at: '2026-05-10T00:00:00', updated_at: '2026-05-10T00:00:00' }]
     const fetchMock = vi.fn((url: string) => {
-      if (url.includes('/auth/me')) return Promise.resolve(new Response(JSON.stringify({ id: 3, name: 'Test Organizer', email: 'testorganizer@example.com', phone: '9000001001', role: 'member', is_active: true, created_at: '2026-05-10T00:00:00' }), { status: 200 }))
+      if (url.includes('/auth/me')) return Promise.resolve(new Response(JSON.stringify({ id: 3, name: 'Test Organizer', email: 'testorganizer@example.com', phone: '9000001001', city: 'Chennai', onboarding_intent: 'book_stalls', business_name: null, business_category: null, profile_completed_at: '2026-05-10T00:00:00', role: 'member', is_active: true, created_at: '2026-05-10T00:00:00' }), { status: 200 }))
       if (url.includes('/events/mine')) return Promise.resolve(new Response(JSON.stringify(myEventsPayload), { status: 200 }))
       if (url.includes('/bookings')) return Promise.resolve(new Response(JSON.stringify(bookingPayload), { status: 200 }))
       if (url.includes('/events')) return Promise.resolve(new Response(JSON.stringify(eventsPayload), { status: 200 }))

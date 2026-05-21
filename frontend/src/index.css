@@ -121,8 +121,6 @@ textarea { min-height: 92px; resize: vertical; }
 .primary-link { width: fit-content; }
 .menu-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 18px; }
 .menu-actions .ghost-button { width: fit-content; }
-.test-credentials { display: grid; gap: 6px; margin-top: 22px; padding: 16px; border-radius: 20px; background: #f9fafb; border: 1px solid #e5e7eb; }
-.test-credentials p { margin: 0; color: #374151; }
 .primary-button:disabled { background: #9ca3af; }
 .back-link { width: fit-content; color: #db2777; font-weight: 800; }
 .meta-grid { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 18px; }

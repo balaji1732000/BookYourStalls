@@ -15,8 +15,18 @@ const quickSearchChips = [
   { label: 'High footfall', filters: { min_footfall: 5000 } },
 ] satisfies { label: string; filters: EventFilters }[]
 const crowdTypes = ['Families', 'Students', 'Corporate', 'Fashion shoppers', 'Collectors', 'General public']
+const onboardingIntentOptions = [
+  { value: 'book_stalls', label: 'Book stalls' },
+  { value: 'create_events', label: 'Create events' },
+  { value: 'explore_events', label: 'Explore events' },
+  { value: 'both', label: 'Both' },
+]
 
 const LAST_BOOKING_KEY = 'bys_last_booking'
+
+function requiresProfileCompletion(user: User | null) {
+  return Boolean(user && (!user.profile_completed_at || !user.name || !user.phone || !user.city || !user.onboarding_intent))
+}
 
 function phoneDigits(phone: string) {
   return phone.replace(/\D/g, '')
@@ -45,6 +55,7 @@ function Header({ user, onLogout }: { user: User | null; onLogout: () => void })
 
 function Shell({ user, authLoading, setUser }: { user: User | null; authLoading: boolean; setUser: (user: User | null) => void }) {
   const [savedEvents, setSavedEvents] = useState<EventItem[]>([])
+  const profileIncomplete = requiresProfileCompletion(user)
   const logout = () => {
     authStorage.clearToken()
     setUser(null)
@@ -57,18 +68,22 @@ function Shell({ user, authLoading, setUser }: { user: User | null; authLoading:
     <div className="app-shell">
       <Header user={user} onLogout={logout} />
       <main>
-        <Routes>
-          <Route path="/" element={<EventsPage savedIds={savedIds} onToggleSaved={toggleSavedEvent} />} />
-          <Route path="/saved" element={<SavedPage savedEvents={savedEvents} savedIds={savedIds} onToggleSaved={toggleSavedEvent} />} />
-          <Route path="/my-events" element={<MyEventsPage user={user} authLoading={authLoading} savedIds={savedIds} onToggleSaved={toggleSavedEvent} />} />
-          <Route path="/menu" element={<MenuPage user={user} onLogout={logout} />} />
-          <Route path="/notifications" element={<NotificationsPage user={user} authLoading={authLoading} />} />
-          <Route path="/events/new" element={<CreateEventPage user={user} authLoading={authLoading} />} />
-          <Route path="/events/:eventId" element={<EventDetailPage user={user} authLoading={authLoading} />} />
-          <Route path="/login" element={<LoginPage setUser={setUser} />} />
-          <Route path="/register" element={<RegisterPage setUser={setUser} />} />
-          <Route path="*" element={<Navigate to="/" replace />} />
-        </Routes>
+        {profileIncomplete ? (
+          <ProfileCompletionPage user={user as User} setUser={setUser} />
+        ) : (
+          <Routes>
+            <Route path="/" element={<EventsPage savedIds={savedIds} onToggleSaved={toggleSavedEvent} />} />
+            <Route path="/saved" element={<SavedPage savedEvents={savedEvents} savedIds={savedIds} onToggleSaved={toggleSavedEvent} />} />
+            <Route path="/my-events" element={<MyEventsPage user={user} authLoading={authLoading} savedIds={savedIds} onToggleSaved={toggleSavedEvent} />} />
+            <Route path="/menu" element={<MenuPage user={user} onLogout={logout} />} />
+            <Route path="/notifications" element={<NotificationsPage user={user} authLoading={authLoading} />} />
+            <Route path="/events/new" element={<CreateEventPage user={user} authLoading={authLoading} />} />
+            <Route path="/events/:eventId" element={<EventDetailPage user={user} authLoading={authLoading} />} />
+            <Route path="/login" element={<LoginPage setUser={setUser} />} />
+            <Route path="/register" element={<RegisterPage setUser={setUser} />} />
+            <Route path="*" element={<Navigate to="/" replace />} />
+          </Routes>
+        )}
       </main>
       <BottomNav />
     </div>
@@ -254,18 +269,12 @@ function MenuPage({ user, onLogout }: { user: User | null; onLogout: () => void 
       <section className="simple-page-card menu-card">
         <p className="eyebrow">Account</p>
         <h1>Menu</h1>
-        {user ? <p className="hero-copy">Logged in as {user.name} ({user.role}).</p> : <p className="hero-copy">Login or create a test account to request stall bookings.</p>}
+        {user ? <p className="hero-copy">Logged in as {user.name} ({user.role}).</p> : <p className="hero-copy">Login or create an account to request stall bookings.</p>}
         <div className="menu-actions">
           {user ? <button className="ghost-button" onClick={onLogout}>Logout</button> : null}
           {!user ? <Link className="primary-link" to="/login"><LogIn size={18} />Login</Link> : null}
           {!user ? <Link className="ghost-button" to="/register"><UserPlus size={18} />Create account</Link> : null}
           <Link className="ghost-button" to="/">Browse events</Link>
-        </div>
-        <div className="test-credentials">
-          <h2>Test login</h2>
-          <p>Vendor: testvendor@example.com</p>
-          <p>Organizer: testorganizer@example.com</p>
-          <p>Password: TestPass123!</p>
         </div>
       </section>
     </section>
@@ -747,6 +756,70 @@ function BookingForm({ eventId, stall, user, authLoading, onSuccess }: { eventId
   )
 }
 
+function ProfileCompletionPage({ user, setUser }: { user: User; setUser: (user: User | null) => void }) {
+  const navigate = useNavigate()
+  const [name, setName] = useState(user.name && user.name !== user.email?.split('@')[0] ? user.name : '')
+  const [phone, setPhone] = useState(user.phone ?? '')
+  const [city, setCity] = useState(user.city ?? '')
+  const [onboardingIntent, setOnboardingIntent] = useState(user.onboarding_intent ?? 'book_stalls')
+  const [businessName, setBusinessName] = useState(user.business_name ?? '')
+  const [businessCategory, setBusinessCategory] = useState(user.business_category ?? '')
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const submit = async (event: FormEvent) => {
+    event.preventDefault()
+    setLoading(true)
+    setError(null)
+    try {
+      const updatedUser = await apiClient.completeProfile({
+        name: name.trim(),
+        phone: phone.trim(),
+        city,
+        onboarding_intent: onboardingIntent,
+        business_name: businessName.trim() || undefined,
+        business_category: businessCategory.trim() || undefined,
+      })
+      setUser(updatedUser)
+      navigate('/')
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not complete profile')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  return (
+    <section className="auth-card onboarding-card">
+      <p className="eyebrow">Welcome to BookYourStall</p>
+      <h1>Complete your profile</h1>
+      <p className="helper-text">Just a few details so organisers and vendors can connect with you.</p>
+      {error ? <p className="alert error">{error}</p> : null}
+      <form onSubmit={submit} className="onboarding-form" aria-label="Complete profile">
+        <div className="responsive-form-grid">
+          <label>Full name<input value={name} onChange={(event) => setName(event.target.value)} required minLength={2} autoComplete="name" placeholder="Your name" /></label>
+          <label>WhatsApp number<input value={phone} onChange={(event) => setPhone(event.target.value)} required minLength={5} inputMode="tel" autoComplete="tel" placeholder="Mobile / WhatsApp" /></label>
+          <label>City<select value={city} onChange={(event) => setCity(event.target.value)} required><option value="">Select city</option>{cities.map((option) => <option key={option} value={option}>{option}</option>)}</select></label>
+          <label>Business/display name<input value={businessName} onChange={(event) => setBusinessName(event.target.value)} placeholder="Optional" /></label>
+          <label className="span-2">Business category<input value={businessCategory} onChange={(event) => setBusinessCategory(event.target.value)} placeholder="Optional: Fashion, food, handmade..." /></label>
+        </div>
+        <fieldset className="intent-options">
+          <legend>I’m here to</legend>
+          <div className="category-grid compact">
+            {onboardingIntentOptions.map((option) => (
+              <label key={option.value} className={`category-chip ${onboardingIntent === option.value ? 'selected' : ''}`}>
+                <input type="radio" name="onboarding_intent" value={option.value} checked={onboardingIntent === option.value} onChange={() => setOnboardingIntent(option.value)} />
+                {option.label}
+              </label>
+            ))}
+          </div>
+        </fieldset>
+        <button className="primary-button" type="submit" disabled={loading}>{loading ? 'Saving…' : 'Continue'}</button>
+      </form>
+    </section>
+  )
+}
+
 function LoginPage({ setUser }: { setUser: (user: User | null) => void }) {
   const navigate = useNavigate()
   const [email, setEmail] = useState('')
@@ -781,7 +854,7 @@ function LoginPage({ setUser }: { setUser: (user: User | null) => void }) {
     try {
       const response = await apiClient.verifyOtp({ challenge_id: challengeId, email, otp })
       setUser(response.user)
-      navigate('/')
+      navigate(response.requires_profile_completion ? '/profile/complete' : '/')
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Login code verification failed')
     } finally {
